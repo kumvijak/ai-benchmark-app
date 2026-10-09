@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Inference Benchmark Control</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header>
+    <div>
+      <h1>AI Inference Benchmark Control</h1>
+      <p>Configure authentication, connect an Ubuntu VM, start vLLM, run GuideLLM benchmarks, and export reports.</p>
+    </div>
+    <div id="sessionStatus">Starting local session</div>
+  </header>
+
+  <main>
+    <nav class="tabs" aria-label="Workflow sections">
+      <button class="tab active" data-tab="auth">Authentication</button>
+      <button class="tab" data-tab="vm">VM Connection</button>
+      <button class="tab" data-tab="vllm">vLLM Config</button>
+      <button class="tab" data-tab="bench">Benchmarking</button>
+      <button class="tab" data-tab="queue">Queue</button>
+      <button class="tab" data-tab="report">Report</button>
+    </nav>
+
+    <section class="tab-panel active" id="tab-auth">
+      <div class="section-head">
+        <div>
+          <h2>Authentication</h2>
+          <p>Validate the Oracle Cloud authentication mode the tool should use for cloud-side operations. VM SSH is configured separately in the VM Connection tab.</p>
+        </div>
+        <span class="pill" id="authState">Not validated</span>
+      </div>
+
+      <div class="choice-row">
+        <label class="choice-card selected">
+          <input type="radio" name="authMode" value="user_profile" checked>
+          <strong>User profile</strong>
+          <span>Paste an OCI config profile and upload the matching private key.</span>
+        </label>
+        <label class="choice-card">
+          <input type="radio" name="authMode" value="instance_principal">
+          <strong>Instance principal</strong>
+          <span>No local credential material is required. The container must run on an OCI instance with dynamic-group policy.</span>
+        </label>
+      </div>
+
+      <div id="userProfileAuth" class="form-block">
+        <div class="grid two">
+          <label data-help="Friendly name for this OCI authentication profile. Enter the exact profile header from the pasted OCI config, such as DEFAULT if that is the header you are using.">Profile name<input id="ociProfileName" placeholder="Profile header, for example DEFAULT"></label>
+          <label data-help="OCI API private key that matches the fingerprint in the pasted OCI profile. The file is uploaded for validation and stored encrypted.">Private key file<input id="ociKeyFile" type="file" accept=".pem,.key,.txt"></label>
+          <label class="wide" data-help="OCI config profile block containing tenancy, user, fingerprint, key_file reference, and region. The app validates this before OCI VM actions.">OCI profile<textarea id="ociProfileText" rows="9" spellcheck="false" placeholder="[DEFAULT]&#10;user=ocid1.user...&#10;fingerprint=...&#10;tenancy=ocid1.tenancy...&#10;region=us-ashburn-1"></textarea></label>
+          <p class="file-hint wide" id="ociKeyHint">No private key file selected.</p>
+        </div>
+      </div>
+      <div class="auth-memory">
+        <div class="subhead">
+          <h3>Saved Authentication</h3>
+          <p id="authSavedHint">Validated profiles are stored encrypted by the local app. Private keys are never restored into the browser after refresh.</p>
+        </div>
+        <table id="authProfileTable"></table>
+      </div>
+
+      <div class="actions">
+        <button id="addAuthProfileBtn">Add & Validate Profile</button>
+        <button id="validateSelectedAuthBtn" class="secondary">Validate Selected Profile</button>
+        <button id="deleteAuthProfileBtn" class="secondary">Delete Selected Auth Profile</button>
+      </div>
+      <pre id="authOutput">Choose an authentication mode and validate it.</pre>
+    </section>
+
+    <section class="tab-panel" id="tab-vm">
+      <div class="section-head">
+        <div>
+          <h2>VM Connection</h2>
+          <p>Create a guide-approved OCI Ubuntu VM or connect an existing host. New OCI VMs automatically create and test an SSH profile after deployment.</p>
+        </div>
+        <span class="pill">Compute and SSH gate</span>
+      </div>
+      <div class="choice-row">
+        <label class="choice-card selected">
+          <input type="radio" name="vmMode" value="new" checked>
+          <strong>Create new OCI VM</strong>
+          <span>Pick compartment, network, Ubuntu image, and one of the benchmark-guide shapes.</span>
+        </label>
+        <label class="choice-card">
+          <input type="radio" name="vmMode" value="existing">
+          <strong>Use existing VM</strong>
+          <span>Upload an SSH private key and validate the existing Ubuntu host.</span>
+        </label>
+      </div>
+
+      <div id="newVmPanel" class="form-block">
+        <div class="subhead">
+          <h3>New OCI VM</h3>
+          <p>Defaults follow the initial guide: 16 OCPU, 64 GB memory, 200 GB boot volume, Canonical Ubuntu 24.04, and username ubuntu.</p>
+        </div>
+        <div class="actions top-actions">
+          <button id="loadOciOptionsBtn">Load OCI Options</button>
+        </div>
+        <div class="grid four">
+          <label class="wide" data-help="Validated OCI profile used to list compartments, networks, images, and create or destroy compute instances.">OCI auth profile<select id="ociAuthProfileSelect"></select></label>
+          <label data-help="Name assigned to the OCI instance and the generated SSH profile after deployment.">Display name<input id="newVmName" placeholder="aig-bench-e6ax"></label>
+          <label data-help="Compartment where the compute instance will be created.">Compute compartment<select id="computeCompartment"></select></label>
+          <label data-help="Availability domain for the new VM. Pick one compatible with the selected subnet and shape capacity.">Availability domain<select id="availabilityDomain"></select></label>
+          <label data-help="OCI compute shape. The list is restricted to the shapes from the initial benchmark guide.">Shape<select id="ociShape"></select></label>
+          <label data-help="Number of OCPUs for flex shapes. Defaults to the guide value and can be adjusted for controlled experiments.">OCPU<input id="ociOcpus" type="number" value="16" min="1" step="0.5"></label>
+          <label data-help="Memory assigned to flex shapes in GiB. Defaults to the guide value.">Memory GB<input id="ociMemory" type="number" value="64" min="1" step="1"></label>
+          <label data-help="Boot volume size in GiB. The app expands the root filesystem during SSH validation to use the available disk.">Boot volume GB<input id="ociBootVolume" type="number" value="200" min="50" step="1"></label>
+          <label data-help="Whether OCI should assign a public IPv4 address to the VM's primary VNIC.">Public IP<select id="assignPublicIp"><option value="true">true</option><option value="false">false</option></select></label>
+          <label data-help="Compartment that contains the VCN and subnet. This can differ from the compute compartment.">Network compartment<select id="networkCompartment"></select></label>
+          <label data-help="Virtual cloud network where the VM will be attached.">VCN<select id="ociVcn"></select></label>
+          <label data-help="Subnet for the VM. Use a public subnet when Public IP is true and direct SSH is required.">Subnet<select id="ociSubnet"></select></label>
+          <label data-help="Linux username used for SSH after provisioning. Ubuntu images normally use ubuntu.">Username<input id="newVmUser" value="ubuntu"></label>
+          <label class="wide" data-help="Canonical Ubuntu 24.04 image selected from OCI image listings.">Ubuntu 24.04 image<select id="ociImage"></select></label>
+          <label data-help="Public SSH key injected into the VM metadata during provisioning.">SSH public key file<input id="sshPublicKeyFile" type="file" accept=".pub,.txt"></label>
+          <label data-help="Private SSH key that matches the injected public key. It is stored encrypted for SSH validation and runtime actions.">SSH private key file<input id="newVmPrivateKeyFile" type="file" accept=".pem,.key,.txt"></label>
+          <p class="file-hint" id="sshPublicKeyHint">No public key file selected.</p>
+          <p class="file-hint" id="newVmPrivateKeyHint">No private key file selected.</p>
+        </div>
+        <div class="actions">
+          <button id="createVmBtn">Create VM and Test SSH</button>
+          <button id="destroyVmBtn">Destroy Selected VM</button>
+        </div>
+        <div id="vmDeployProgress" class="progress-panel hidden" aria-live="polite">
+          <div class="progress-row">
+            <strong id="vmDeployStatus">Waiting to deploy</strong>
+            <span id="vmDeployPercent">0%</span>
+          </div>
+          <div class="progress-track">
+            <div id="vmDeployBar" class="progress-bar" style="width: 0%"></div>
+          </div>
+          <div id="vmDeployStage" class="progress-stage">No deployment in progress.</div>
+        </div>
+        <table id="ociInstanceTable"></table>
+      </div>
+
+      <div id="existingVmPanel" class="form-block hidden">
+        <div class="subhead">
+          <h3>Existing VM</h3>
+          <p>Provide reachable SSH details. Private keys are uploaded from a file and stored encrypted in this local control plane.</p>
+        </div>
+        <div class="grid three">
+          <label data-help="Friendly name for the existing VM profile.">Name<input id="vmName" placeholder="ashburn-e6ax"></label>
+          <label data-help="Public or private IP address or DNS name reachable from this control app.">Host<input id="vmHost" placeholder="203.0.113.10"></label>
+          <label data-help="SSH port on the VM. Most Ubuntu images use 22.">Port<input id="vmPort" type="number" value="22"></label>
+          <label data-help="Linux account used for SSH. OCI Ubuntu images usually use ubuntu.">Username<input id="vmUser" placeholder="ubuntu"></label>
+          <label data-help="SSH private key file for this VM. The content is not shown in the browser and is stored encrypted.">Private key file<input id="vmKeyFile" type="file" accept=".pem,.key,.txt"></label>
+          <label data-help="Optional key passphrase. Leave empty for unencrypted keys.">Passphrase<input id="vmPassphrase" type="password" placeholder="optional"></label>
+          <p class="file-hint wide" id="vmKeyHint">No private key file selected.</p>
+        </div>
+        <div class="actions">
+          <button id="saveVmBtn">Save VM Profile</button>
+          <button id="healthBtn">Run SSH Health Check</button>
+        </div>
+      </div>
+      <table id="vmTable"></table>
+      <div class="actions">
+        <button id="deleteVmBtn" class="secondary">Delete Selected VM Profile</button>
+      </div>
+      <div class="job-detail">
+        <div class="subhead">
+          <h3>VM Setup Status</h3>
+          <p>Root volume expansion, vLLM installation, and GuideLLM readiness are updated during SSH validation.</p>
+        </div>
+        <table id="vmSetupTable"></table>
+      </div>
+    </section>
+
+    <section class="tab-panel" id="tab-vllm">
+      <div class="section-head">
+        <div>
+          <h2>vLLM Configuration</h2>
+          <p>Define the exact runtime command and CPU environment variables. Every benchmark stores the selected vLLM profile and model reference.</p>
+        </div>
+        <span class="pill">Runtime profile</span>
+      </div>
+      <div class="grid four">
+        <label class="wide" data-help="VM where start, stop, and process refresh actions will run.">Apply runtime actions to VM<select id="runtimeVmSelect"></select></label>
+        <label data-help="Friendly name for this vLLM runtime profile.">Name<input id="vllmName" placeholder="qwen-cpu-bf16"></label>
+        <label data-help="Model identifier passed to vLLM, such as a Hugging Face repo ID or a local model path on the VM.">Model<input id="modelRef" placeholder="Qwen/Qwen3-4B-Base"></label>
+        <label data-help="Precision used by vLLM. bfloat16 is the default guide choice for supported CPUs; float32 is safer but heavier.">Dtype<select id="dtype"><option>bfloat16</option><option>float32</option><option>auto</option></select></label>
+        <label data-help="Port where vLLM exposes its OpenAI-compatible API on the VM. GuideLLM targets this port locally over SSH execution.">Port<input id="runtimePort" type="number" value="8000"></label>
+        <label data-help="Maximum context length vLLM will serve. Lower values reduce memory pressure.">Max model len<input id="maxModelLen" type="number" value="4096"></label>
+        <label data-help="Optional vLLM cap for tokens batched together. Leave empty to use vLLM's default.">Max batched tokens<input id="maxBatchedTokens" type="number" placeholder="optional"></label>
+        <label data-help="Maximum concurrent sequences vLLM schedules. Lower values can protect CPU memory on smaller shapes.">Max seqs<input id="maxSeqs" type="number" value="8"></label>
+        <label data-help="CPU KV cache space in GiB reserved for vLLM. Increase for longer context or higher concurrency when memory allows.">KV cache GiB<input id="kvCache" type="number" value="40"></label>
+        <label data-help="CPU cores reserved for the OS and background work instead of vLLM.">Reserved CPU<input id="reservedCpu" type="number" value="2"></label>
+        <label data-help="Client timeout in seconds for runtime readiness checks and GuideLLM OpenAI HTTP requests.">Request timeout<input id="requestTimeout" type="number" value="30"></label>
+        <label class="check" data-help="Enables vLLM prefix caching so repeated prompt prefixes can reuse cached KV state. Keep this explicit because it changes benchmark behavior."><input id="prefixCache" type="checkbox"><span>Prefix cache</span></label>
+        <label class="check" data-help="Enables chunked prefill so long prompts can be prefetched in chunks, which may improve scheduling for mixed prompt lengths."><input id="chunkedPrefill" type="checkbox"><span>Chunked prefill</span></label>
+      </div>
+      <div class="actions">
+        <button id="saveVllmBtn">Save vLLM Profile</button>
+        <button id="startRuntimeBtn">Start Runtime</button>
+        <button id="stopRuntimeBtn" class="secondary">Stop Selected Runtime</button>
+        <button id="refreshRuntimeBtn" class="secondary">Refresh Runtime Processes</button>
+      </div>
+      <table id="vllmTable"></table>
+      <div class="actions">
+        <button id="deleteVllmBtn" class="secondary">Delete Selected vLLM Profile</button>
+      </div>
+      <div class="job-detail">
+        <div class="subhead">
+          <h3>Running vLLM Processes</h3>
+          <p>Live process discovery from the selected VM. Select a process before stopping it.</p>
+        </div>
+        <table id="runtimeProcessTable"></table>
+      </div>
+    </section>
+
+    <section class="tab-panel" id="tab-bench">
+      <div class="section-head">
+        <div>
+          <h2>Benchmarking</h2>
+          <p>Select a workload profile from the initial guide or choose custom values. Presets define input/output token targets and recommended concurrency streams.</p>
+        </div>
+        <span class="pill">Real streaming requests</span>
+      </div>
+      <div class="guidance-panel">
+        <div>
+          <h3>Fixed concurrency</h3>
+          <p>GuideLLM keeps the selected number of parallel request streams active for each selected concurrency. Use this to compare known workload levels like 1, 2, 4, 8, or 16 streams.</p>
+        </div>
+        <div>
+          <h3>Sweep</h3>
+          <p>GuideLLM runs a baseline, a peak-throughput probe, then interpolated request-rate strategies up to the selected max concurrency. Use this to find the saturation point and safe operating range.</p>
+        </div>
+      </div>
+      <div class="grid four">
+        <label data-help="VM where GuideLLM will run and where the selected vLLM endpoint must already be reachable.">Benchmark VM<select id="benchmarkVmSelect"></select></label>
+        <label data-help="Saved vLLM profile that supplies the model name, API port, and request timeout for GuideLLM.">vLLM profile<select id="benchmarkVllmSelect"></select></label>
+        <label data-help="Preset workload from the guide. Custom keeps your manually entered token, request, and concurrency values.">Workload profile<select id="workloadPreset"></select></label>
+        <label data-help="Fixed concurrency runs selected stream counts directly. Sweep searches across baseline, peak throughput, and interpolated request rates.">GuideLLM mode<select id="benchmarkMode"><option value="concurrent">Fixed concurrency</option><option value="sweep">Sweep</option></select></label>
+        <label data-help="Synthetic prompt size in tokens for each GuideLLM request.">Input tokens<input id="inputTokens" type="number" value="128"></label>
+        <label data-help="Synthetic generated-token target for each GuideLLM request.">Output tokens<input id="outputTokens" type="number" value="64"></label>
+        <label data-help="In fixed mode, selected values are the exact GuideLLM concurrent streams. In sweep mode, the largest selected value becomes max_concurrency.">Concurrency / max sweep concurrency<select id="concurrency" class="compact-multi" multiple size="3"></select></label>
+        <label data-help="Maximum requests GuideLLM may process per strategy. Keep it as a safety cap when duration is the main run limit.">Max requests per strategy<input id="maxRequests" type="number" value="10"></label>
+        <label data-help="Maximum seconds GuideLLM runs each strategy. With multiple fixed concurrencies or a sweep, this applies to each strategy, not the whole job.">Max duration seconds<input id="maxDurationSeconds" type="number" value="600" min="1"></label>
+        <label data-help="Pause between GuideLLM strategies so the server can settle before the next load point.">Cooldown seconds<input id="cooldownSeconds" type="number" value="5" min="0"></label>
+        <label data-help="Static seed for synthetic data generation so repeated runs are comparable.">Seed<input id="benchmarkSeed" type="number" value="42"></label>
+        <label data-help="Number of GuideLLM sweep strategies. It includes synchronous baseline, throughput probe, and interpolated rate points.">Sweep size<input id="sweepSize" type="number" value="10" min="3"></label>
+        <label data-help="GuideLLM interpolated sweep traffic pattern. constant sends an even rate; poisson adds arrival jitter like real user traffic.">Sweep strategy<select id="sweepStrategyType"><option value="poisson">poisson</option><option value="constant">constant</option></select></label>
+        <label class="wide" data-help="Read-only summary of the selected workload preset and its intended benchmark shape.">Workload details<textarea id="workloadDetails" rows="3" readonly></textarea></label>
+      </div>
+      <div class="actions">
+        <button id="runBenchmarkBtn">Queue Benchmark</button>
+      </div>
+    </section>
+
+    <section class="tab-panel" id="tab-report">
+      <div class="section-head">
+        <div>
+          <h2>Report</h2>
+          <p>Select a successful benchmark job to render its report. Failed and running jobs are visible in the benchmark table but cannot produce reports.</p>
+        </div>
+        <span class="pill">Copy and download</span>
+      </div>
+      <div class="actions">
+        <button id="copyMarkdownBtn">Copy Markdown</button>
+        <button id="downloadCsvBtn">Download CSV</button>
+        <button id="downloadJsonBtn">Download JSON</button>
+        <button id="downloadMdBtn">Download Markdown</button>
+        <button id="downloadHtmlBtn">Open GuideLLM HTML</button>
+      </div>
+      <div id="reportOutput" class="report-output empty">Run a benchmark and select a successful benchmark job.</div>
+    </section>
+
+    <section class="tab-panel" id="tab-queue">
+      <div class="section-head">
+        <div>
+          <h2>Queue</h2>
+          <p>Monitor queued, running, succeeded, and failed jobs. This view refreshes every 5 seconds and shows failure logs when a failed job is selected.</p>
+        </div>
+        <span class="pill" id="queueRefreshState">Auto refresh on</span>
+      </div>
+      <div class="queue-summary" id="queueSummary">
+        <span>Queued: 0</span>
+        <span>Running: 0</span>
+        <span>Succeeded: 0</span>
+        <span>Failed: 0</span>
+      </div>
+      <table id="queueTable"></table>
+      <div class="actions">
+        <button id="deleteJobBtn" class="secondary">Delete Selected Job</button>
+      </div>
+      <div class="job-detail">
+        <div class="subhead">
+          <h3>Job Detail</h3>
+          <p id="queueDetailHint">Select any job to inspect status, progress, result summary, or failure logs.</p>
+        </div>
+        <pre id="queueLogOutput">No job selected.</pre>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+services:
+  benchmark-control:
+    build: .
+    image: aig-inference-app-v1:local
+    ports:
+      - "127.0.0.1:${APP_PORT:-18080}:8080"
+    environment:
+      APP_SECRET: "${APP_SECRET:?APP_SECRET must be set}"
+      APP_LOCAL_USER_EMAIL: "${APP_LOCAL_USER_EMAIL:?APP_LOCAL_USER_EMAIL must be set}"
+      APP_DB_PATH: "/data/app.db"
+      APP_ARTIFACT_DIR: "/data/artifacts"
+    volumes:
+      - benchmark-control-data:/data
+
+volumes:
+  benchmark-control-data:

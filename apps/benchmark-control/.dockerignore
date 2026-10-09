@@ -1,0 +1,14 @@
+.git
+.env
+.env.*
+*.pem
+*.key
+*.db
+*.db-*
+__pycache__
+*.pyc
+.venv
+data
+output
+docs
+README.md

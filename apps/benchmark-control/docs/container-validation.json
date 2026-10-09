@@ -1,0 +1,14 @@
+{
+  "compose_config": "PASS",
+  "startup_health": "PASS",
+  "http_session": "PASS",
+  "persistent_profile_after_restart": "PASS",
+  "session_after_restart": "PASS",
+  "pip_check": "No broken requirements found.",
+  "ssh_client": "PASS",
+  "image_id": "sha256:310e62100cc9a0e1d44abbdd51f818702d8386cc4d5f98af4912f45394849159",
+  "platform": "linux/arm64",
+  "image_size_bytes": 649229946,
+  "health_before_cleanup": "healthy",
+  "remote_oci_ssh_model_benchmark": "NOT_RUN"
+}
