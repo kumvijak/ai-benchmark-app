@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import base64
 import shlex
-from dataclasses import dataclass
+import json
+from dataclasses import asdict, dataclass
 
 from .runtime import build_runtime_check_script, build_runtime_launcher
 
@@ -73,7 +74,7 @@ def build_vllm_command(profile: VllmProfile, checkpoint_path: str | None = None,
     return f"{exports} {quoted}"
 
 
-def build_start_script(profile: VllmProfile, checkpoint_path: str | None = None) -> str:
+def build_start_script(profile: VllmProfile, checkpoint_path: str | None = None, quantization_evidence: dict | None = None) -> str:
     launch_path = f"/tmp/aig-benchmark-control/vllm-launch-{profile.port}.py"
     launcher = base64.b64encode(build_runtime_launcher().encode()).decode()
     command = build_vllm_command(profile, checkpoint_path, launch_path)
@@ -91,6 +92,8 @@ def build_start_script(profile: VllmProfile, checkpoint_path: str | None = None)
             " - <<'VERIFY'", f" - > /tmp/aig-benchmark-control/runtime-{profile.port}.json <<'VERIFY'"
         ) +
         f"export AIG_RUNTIME_PORT={profile.port}\n"
+        f"export AIG_SERVING_CONFIG={shlex.quote(json.dumps(asdict(profile)))}\n"
+        f"export AIG_QUANTIZATION_EVIDENCE={shlex.quote(json.dumps(quantization_evidence or {}))}\n"
         "\"$HOME/.aig-vllm/bin/python\" - <<'LAUNCHER'\n"
         "import base64, pathlib\n"
         f"pathlib.Path({launch_path!r}).write_bytes(base64.b64decode({launcher!r}))\n"

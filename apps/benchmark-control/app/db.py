@@ -156,6 +156,8 @@ class Database:
     def init(self) -> None:
         with self._lock:
             self.connect().executescript(SCHEMA)
+            from .reporting import REPORT_SCHEMA
+            self.connect().executescript(REPORT_SCHEMA)
             self._ensure_column("vm_setup_status", "benchmark_version", "TEXT")
             self._ensure_column("vm_setup_status", "runtime_evidence", "TEXT NOT NULL DEFAULT '{}'")
             self._ensure_column("vllm_profiles", "quantization", "TEXT NOT NULL DEFAULT 'none'")

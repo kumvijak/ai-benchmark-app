@@ -55,7 +55,8 @@ def verify_runtime():
     require(torch.version.cuda is None, 'A CPU-only PyTorch build is required')
     amx_probe = getattr(getattr(torch, 'cpu', None), '_is_amx_tile_supported', None)
     amx_runtime_supported = bool(amx_probe()) if vendor == 'intel' and callable(amx_probe) else False
-    require(importlib.metadata.version('triton') == '3.8.0+cpu', 'CPU Triton 3.8.0+cpu is required')
+    versions['triton_version'] = importlib.metadata.version('triton')
+    require(versions['triton_version'] == '3.8.0+cpu', 'CPU Triton 3.8.0+cpu is required')
     importlib.import_module('vllm._C')
     config = ''
     hashes = {}
@@ -118,6 +119,8 @@ def build_runtime_launcher() -> str:
 if __name__ == '__main__':
     import sys
     evidence = verify_runtime()
+    evidence['serving_config'] = json.loads(os.environ.get('AIG_SERVING_CONFIG', '{}'))
+    evidence['quantization_evidence'] = json.loads(os.environ.get('AIG_QUANTIZATION_EVIDENCE', '{}'))
     evidence['server_pid'] = os.getpid()
     evidence['server_start_ticks'] = pathlib.Path(f'/proc/{os.getpid()}/stat').read_text().rsplit(')', 1)[1].split()[19]
     path = pathlib.Path('/tmp/aig-benchmark-control') / f"runtime-{os.environ['AIG_RUNTIME_PORT']}.json"

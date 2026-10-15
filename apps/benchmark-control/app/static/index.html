@@ -23,7 +23,8 @@
       <button class="tab" data-tab="vllm">vLLM Config</button>
       <button class="tab" data-tab="bench">Benchmarking</button>
       <button class="tab" data-tab="queue">Queue</button>
-      <button class="tab" data-tab="report">Report</button>
+      <button class="tab" data-tab="generated">Reports</button>
+      <button class="tab" data-tab="report">Native Report</button>
     </nav>
 
     <section class="tab-panel active" id="tab-auth">
@@ -254,6 +255,20 @@
       </div>
     </section>
 
+    <section class="tab-panel" id="tab-generated">
+      <div class="section-head"><div><h2>Reports</h2><p>Generate MLCommons-style reports from retained benchmark evidence. Reports run on a dedicated queue and remain available after VM termination.</p></div><span class="pill">Offline HTML · CSV · JSON · ZIP</span></div>
+      <div class="form-grid">
+        <label>Report title<input id="generatedTitle" maxlength="160" value="CPU inference benchmark report"></label>
+        <label>Filter reports<input id="generatedFilter" type="search" placeholder="Title or report ID"></label>
+      </div>
+      <p>Choose finished attempts. Different model, precision, host and workload configurations receive separate detail pages; retries remain separate columns.</p>
+      <div class="actions"><button id="selectReportSourcesBtn" class="secondary">Select all finished attempts</button><button id="clearReportSourcesBtn" class="secondary">Clear selection</button></div>
+      <div id="generatedSources" class="report-source-list"></div>
+      <div class="actions"><button id="generateReportBtn">Queue Report</button><button id="refreshGeneratedBtn" class="secondary">Refresh reports</button></div>
+      <p id="generatedQueueStatus" aria-live="polite">Loading reporting queue…</p>
+      <div id="generatedCatalogue"></div>
+    </section>
+
     <section class="tab-panel" id="tab-report">
       <div class="section-head">
         <div>
@@ -302,5 +317,6 @@
 
   <div id="toast"></div>
   <script src="/static/app.js"></script>
+  <script src="/static/reports.js"></script>
 </body>
 </html>

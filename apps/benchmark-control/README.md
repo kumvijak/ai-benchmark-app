@@ -119,3 +119,11 @@ records detected vendor/platform/version/AMX capabilities and process identity, 
 invokes the vLLM CLI. Benchmarks require matching activation evidence from a
 live server and include it in job results and GuideLLM artifact labels.
 BF16 remains the default; validate quantized model paths separately.
+
+## Generated reports (0.3.0)
+
+The **Reports** tab queues MLCommons-style offline report collections with four performance charts, configuration detail pages, side-by-side concurrency/retry tables, evidence warnings, and CSV/JSON/ZIP downloads. Finished failed attempts can be included. **Native Report** retains the existing GuideLLM exports.
+
+Docker Compose starts a dedicated `report-worker` service using the shared data volume. Single-process local development defaults to an independent embedded reporting thread. Reports use immutable evidence snapshots and do not require live benchmark VMs. Restart existing inference runtimes after upgrading before running new benchmarks: serving-model/precision matching is now required.
+
+See [Reports module](docs/reporting.md) for usage, queue recovery, artifact storage, API endpoints and measurement limitations. Native timing is not independently validated by this first version; reconstructed throughput is withheld.

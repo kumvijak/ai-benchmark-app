@@ -7,6 +7,17 @@ services:
     environment:
       APP_SECRET: "${APP_SECRET:?APP_SECRET must be set}"
       APP_LOCAL_USER_EMAIL: "${APP_LOCAL_USER_EMAIL:?APP_LOCAL_USER_EMAIL must be set}"
+      APP_REPORT_WORKER_MODE: "external"
+      APP_DB_PATH: "/data/app.db"
+      APP_ARTIFACT_DIR: "/data/artifacts"
+    volumes:
+      - benchmark-control-data:/data
+
+  report-worker:
+    build: .
+    command: ["python", "-m", "app.report_worker"]
+    restart: unless-stopped
+    environment:
       APP_DB_PATH: "/data/app.db"
       APP_ARTIFACT_DIR: "/data/artifacts"
     volumes:

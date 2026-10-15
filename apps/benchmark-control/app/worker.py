@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 import threading
 import time
@@ -15,6 +15,21 @@ from .security import SecretBox, redact
 from .runtime import VLLM_VERSION, TORCH_VERSION, ZENTORCH_VERSION, ZENDNN_VERSION
 from .ssh_client import HEALTH_SCRIPT, VM_SETUP_SCRIPT, SshClient, VmProfile, parse_health, parse_setup, wait_for_http
 from .vllm import VllmProfile, build_start_script, build_vllm_command
+
+
+class BenchmarkExecutionError(RuntimeError):
+    def __init__(self, message, result):
+        super().__init__(message)
+        self.result = result
+
+
+def assert_serving_profile(profile, evidence):
+    expected = asdict(profile)
+    # The client timeout does not change the server's effective model configuration.
+    expected.pop('request_timeout_seconds')
+    actual = evidence.get('serving_config') or {}
+    if any(actual.get(key) != value for key, value in expected.items()):
+        raise RuntimeError('Running model/precision/configuration does not match the selected profile; restart the runtime')
 
 
 class Worker:
@@ -50,8 +65,8 @@ class Worker:
                 self._run_job(job)
             except Exception as exc:
                 self.db.execute(
-                    "UPDATE jobs SET status='failed', error_message=?, finished_at=CURRENT_TIMESTAMP WHERE id=?",
-                    (redact(str(exc)), job["id"]),
+                    "UPDATE jobs SET status='failed', error_message=?, result=COALESCE(?,result), finished_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (redact(str(exc)), json.dumps(exc.result) if isinstance(exc, BenchmarkExecutionError) else None, job["id"]),
                 )
 
     def _run_job(self, job: dict[str, Any]) -> None:
@@ -236,7 +251,7 @@ class Worker:
                 self.db.execute('UPDATE vllm_profiles SET model_revision=? WHERE id=? AND owner_user_id=?',
                                 (profile.model_revision, int(payload['vllm_profile_id']), user_id))
             checkpoint_path = quantization_evidence['checkpoint_path'] if quantization_evidence else None
-            script = build_start_script(profile, checkpoint_path)
+            script = build_start_script(profile, checkpoint_path, quantization_evidence)
             code, out, err = ssh.run(script, timeout=180)
             if code != 0:
                 raise RuntimeError(f"vLLM start failed: {err or out}")
@@ -282,7 +297,7 @@ class Worker:
             "for line in log.splitlines():\n"
             "    if line.startswith('AIG_RUNTIME_BACKEND='):\n"
             "        activation.append(json.loads(line.split('=', 1)[1]))\n"
-            "evidence['server_activation_verified'] = any(all(item.get(key) == evidence.get(key) for key in ('server_pid', 'server_start_ticks', 'platform', 'backend', 'amx_runtime_supported', 'amx_policy')) for item in activation)\n"
+            "evidence['server_activation_verified'] = any(all(item.get(key) == evidence.get(key) for key in ('server_pid', 'server_start_ticks', 'platform', 'backend', 'amx_runtime_supported', 'amx_policy', 'serving_config', 'quantization_evidence')) for item in activation)\n"
             "proc = pathlib.Path('/proc') / str(evidence.get('server_pid', 'missing'))\n"
             "evidence['server_alive'] = proc.exists()\n"
             "if evidence['server_alive']:\n"
@@ -349,6 +364,19 @@ class Worker:
             raise RuntimeError("benchmark_mode must be concurrent or sweep")
         with SshClient(vm) as ssh:
             runtime_evidence = self._runtime_evidence(ssh, vllm.port)
+            assert_serving_profile(vllm, runtime_evidence)
+            system_script = """python3 - <<'SYSTEM'
+import json, os, pathlib, platform
+cpu = dict(line.split(':', 1) for line in pathlib.Path('/proc/cpuinfo').read_text().split('\\n\\n', 1)[0].splitlines() if ':' in line)
+cpu = {key.strip(): value.strip() for key,value in cpu.items()}
+print(json.dumps({'exposed_vcpus': os.cpu_count(), 'cpu': {key:cpu.get(key) for key in ('vendor_id','model name','cpu family','model','stepping','flags')}, 'memory': pathlib.Path('/proc/meminfo').read_text().splitlines()[0], 'os': platform.platform()}))
+SYSTEM"""
+            system = json.loads(ssh.run_checked(system_script, timeout=20).strip().splitlines()[-1])
+            system['vm_profile_id'] = int(payload['vm_profile_id'])
+            instance = self.db.one("SELECT shape,ocpus,memory_gb FROM oci_compute_instances WHERE owner_user_id=? AND vm_profile_id=? ORDER BY id DESC LIMIT 1", (user_id, int(payload['vm_profile_id'])))
+            if instance:
+                system.update(instance)
+            execution_snapshot = dict(profile=asdict(vllm), system=system, serving_identity_verified=True)
             if job_id:
                 self._set_job_progress(
                     int(job_id),
@@ -369,8 +397,8 @@ class Worker:
                 request_timeout_seconds=vllm.request_timeout_seconds,
                 mode=mode,
                 max_duration_seconds=int(payload.get("max_duration_seconds") or 600),
-                cooldown_seconds=int(payload.get("cooldown_seconds") or 5),
-                seed=int(payload.get("seed") or 42),
+                cooldown_seconds=int(payload.get("cooldown_seconds", 5)),
+                seed=int(payload.get("seed", 42)),
                 sweep_size=int(payload.get("sweep_size") or 10),
                 sweep_strategy_type=str(payload.get("sweep_strategy_type") or "poisson"),
                 runtime_evidence=runtime_evidence,
@@ -378,13 +406,20 @@ class Worker:
             command = remote_guidellm_command(spec, int(job_id or 0))
             timeout = max(900, (spec.max_duration_seconds + 120) * max(1, len(concurrencies)))
             code, out, err = ssh.run(command, timeout=timeout)
-            if code != 0:
-                raise RuntimeError(f"GuideLLM benchmark failed: {err or out}")
-            envelope = json.loads(out.strip().splitlines()[-1])
+            try:
+                envelope = json.loads(out.strip().splitlines()[-1])
+            except (ValueError, IndexError):
+                envelope = {'returncode': code, 'spec': spec.__dict__, 'artifacts': {}, 'stderr': redact(str(err or out))}
             result = normalize_guidellm_result(envelope)
+            execution_snapshot['guidellm_version'] = envelope.get('guidellm_version')
+            result['execution_snapshot'] = execution_snapshot
             result['runtime_evidence'] = runtime_evidence
             result['model_precision'] = {'quantization': vllm.quantization, 'dtype': vllm.dtype,
                                          'source_model': vllm.model_ref, 'source_revision': vllm.model_revision}
+            if code != 0 or envelope.get('returncode', 0) != 0:
+                raise BenchmarkExecutionError(f'GuideLLM failed (exit {code}); native evidence retained', result)
+            if not result.get('guidellm_json') or not result.get('guidellm_json', {}).get('benchmarks'):
+                raise BenchmarkExecutionError('GuideLLM produced no native measurements; evidence retained', result)
         if job_id:
             self._set_job_progress(
                 int(job_id),

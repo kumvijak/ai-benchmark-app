@@ -29,7 +29,7 @@ class GuideLLMBenchmarkSpec:
 
 
 GUIDELLM_REMOTE_SCRIPT = r"""
-import base64, json, os, subprocess, sys, time
+import base64, importlib.metadata, json, os, subprocess, sys, time
 
 spec = json.loads(sys.stdin.read())
 job_id = spec["job_id"]
@@ -124,6 +124,7 @@ for name, path, binary in [
 
 payload = {
     "returncode": proc.returncode,
+    "guidellm_version": importlib.metadata.version("guidellm"),
     "duration_seconds": duration,
     "command": args,
     "job_dir": job_dir,
@@ -251,7 +252,7 @@ def report_html(result: dict[str, Any]) -> str:
 
 def normalize_guidellm_result(envelope: dict[str, Any]) -> dict[str, Any]:
     artifacts = decode_guidellm_artifacts(envelope)
-    guidellm_json = None
+    guidellm_json = envelope.get("guidellm_json")
     if artifacts.get("json"):
         try:
             guidellm_json = json.loads(artifacts["json"])
@@ -345,8 +346,8 @@ def _guidellm_benchmark_rows(raw: Any, spec: dict[str, Any]) -> list[dict[str, A
             "itl_ms_p50": percentile("inter_token_latency_ms", "p50"),
             "itl_ms_p95": percentile("inter_token_latency_ms", "p95"),
             "tpot_ms_p50": percentile("time_per_output_token_ms", "p50"),
-            "e2e_ms_p50": percentile("request_latency", "p50"),
-            "e2e_ms_p95": percentile("request_latency", "p95"),
+            "e2e_ms_p50": (percentile("request_latency", "p50") * 1000 if percentile("request_latency", "p50") is not None else None),
+            "e2e_ms_p95": (percentile("request_latency", "p95") * 1000 if percentile("request_latency", "p95") is not None else None),
             "output_tokens_per_second": mean("output_tokens_per_second"),
             "total_tokens_per_second": mean("tokens_per_second"),
             "duration_seconds": benchmark.get("duration"),

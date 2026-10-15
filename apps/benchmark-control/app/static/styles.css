@@ -487,3 +487,11 @@ select.compact-multi {
   .tab-panel { grid-column: auto; grid-row: auto; }
   .wide { grid-column: span 1; }
 }
+
+.report-source-list { max-height: 260px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+.report-source-list label { display: flex; flex-direction: row; align-items: center; gap: 10px; padding: 6px; }
+.report-source-list input { width: auto; }
+.generated-card { border: 1px solid var(--line); background: white; padding: 18px; border-radius: 10px; margin: 14px 0; }
+.generated-card h3 { margin: 0 0 8px; }
+.generated-card progress { width: 100%; height: 12px; }
+.generated-card p { overflow-wrap: anywhere; }

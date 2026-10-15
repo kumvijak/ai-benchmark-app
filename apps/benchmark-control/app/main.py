@@ -7,7 +7,7 @@ import tempfile
 from typing import Annotated, Any, Literal
 import urllib.request
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response
+from fastapi import Cookie, Request, Depends, FastAPI, Header, HTTPException, Query, Response
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
@@ -19,14 +19,17 @@ from .oci_ops import DEFAULT_VM_DEPLOYMENT, DOC_APPROVED_SHAPES, context_from_sa
 from .security import SecretBox, create_token, hash_password, redact, verify_password
 from .ssh_client import HEALTH_SCRIPT, SshClient, VmProfile, parse_health
 from .worker import Worker
+from .report_worker import ReportWorker
+from .reporting import enqueue_report
 
 settings = get_settings()
 db = Database(settings.db_path)
 db.init()
 secret_box = SecretBox(settings.app_secret)
 worker = Worker(db, secret_box)
+report_worker = ReportWorker(db, settings.artifact_dir)
 
-app = FastAPI(title="AI Inference Benchmark Control", version="0.2.1")
+app = FastAPI(title="AI Inference Benchmark Control", version="0.3.0")
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
 
@@ -148,11 +151,15 @@ def current_user(
 @app.on_event("startup")
 def start_worker() -> None:
     worker.start()
+    if os.getenv("APP_REPORT_WORKER_MODE", "embedded") == "embedded":
+        report_worker.start()
 
 
 @app.on_event("shutdown")
 def stop_worker() -> None:
     worker.stop()
+    if os.getenv("APP_REPORT_WORKER_MODE", "embedded") == "embedded":
+        report_worker.stop()
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -612,6 +619,97 @@ def delete_job(job_id: int, user: dict[str, Any] = Depends(current_user)) -> dic
     db.execute("DELETE FROM jobs WHERE id=? AND owner_user_id=?", (job_id, user["id"]))
     db.audit(user["id"], "deleted", "job", job_id, {})
     return {"deleted": True, "id": job_id}
+
+
+class GenerateReportRequest(BaseModel):
+    title: str = Field(default="CPU inference benchmark report", min_length=1, max_length=160)
+    job_ids: list[int] = Field(min_length=1, max_length=100)
+
+
+@app.get("/api/generated-reports/sources")
+def report_sources(user: dict[str, Any] = Depends(current_user)):
+    rows = db.all("SELECT id,status,created_at,finished_at,result FROM jobs WHERE owner_user_id=? AND job_type='run_benchmark' AND status IN ('succeeded','failed') ORDER BY id DESC", (user["id"],))
+    for row in rows:
+        result = json.loads(row.pop('result') or '{}')
+        profile = (result.get('execution_snapshot') or {}).get('profile') or result.get('model_precision') or {}
+        row.update(model=profile.get('model_ref') or profile.get('source_model') or (result.get('spec') or {}).get('model_ref'),
+                   precision=profile.get('quantization'), workload=(result.get('spec') or {}).get('workload_name'))
+    return rows
+
+
+@app.post("/api/generated-reports")
+def generate_report(req: GenerateReportRequest, user: dict[str, Any] = Depends(current_user)):
+    try:
+        return enqueue_report(db, user["id"], req.title, req.job_ids)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/generated-reports")
+def generated_reports(user: dict[str, Any] = Depends(current_user)):
+    rows = db.all("SELECT id,title,status,stage,progress,summary,error_message,attempts,created_at,finished_at FROM report_jobs WHERE owner_user_id=? ORDER BY id DESC LIMIT 200", (user["id"],))
+    for row in rows:
+        row['summary'] = json.loads(row['summary']) if row['summary'] else None
+    return rows
+
+
+@app.post("/api/generated-reports/{report_id}/retry")
+def retry_report(report_id: int, user: dict[str, Any] = Depends(current_user)):
+    row = db.one('SELECT status FROM report_jobs WHERE id=? AND owner_user_id=?', (report_id,user['id']))
+    if not row:
+        raise HTTPException(status_code=404, detail='Report not found')
+    updated = db.execute("UPDATE report_jobs SET status='queued',stage='queued',progress=0,attempts=0,error_message=NULL WHERE id=? AND owner_user_id=? AND status='failed'", (report_id,user['id']))
+    if updated.rowcount != 1:
+        raise HTTPException(status_code=409, detail='Only failed report jobs can be retried')
+    return {'id':report_id,'status':'queued'}
+
+
+@app.post("/api/generated-reports/{report_id}/access")
+def open_generated_report(report_id: int, request: Request, response: Response, user: dict[str, Any] = Depends(current_user)):
+    row = db.one('SELECT status FROM report_jobs WHERE id=? AND owner_user_id=?', (report_id,user['id']))
+    if not row:
+        raise HTTPException(status_code=404, detail='Report not found')
+    if row['status'] != 'succeeded':
+        raise HTTPException(status_code=409, detail='Report is not ready')
+    authorization = request.headers.get('authorization', '')
+    access = authorization.removeprefix('Bearer ').strip() if authorization.startswith('Bearer ') else request.query_params.get('token')
+    response.set_cookie('report_access', access, path=f'/api/generated-reports/{report_id}/files/', httponly=True,
+                        secure=request.url.scheme == 'https', samesite='lax', max_age=3600)
+    return {'ready': True}
+
+
+def report_artifact_user(
+    authorization: Annotated[str | None, Header()] = None,
+    token: Annotated[str | None, Query()] = None,
+    report_access: Annotated[str | None, Cookie()] = None,
+):
+    return current_user(authorization=authorization, token=token or (None if authorization else report_access))
+
+
+@app.get("/api/generated-reports/{report_id}/files/{filename:path}")
+def generated_report_file(report_id: int, filename: str, request: Request, user: dict[str, Any] = Depends(report_artifact_user)):
+    row = db.one('SELECT status,artifact_token FROM report_jobs WHERE id=? AND owner_user_id=?', (report_id,user['id']))
+    if not row:
+        raise HTTPException(status_code=404, detail='Report not found')
+    if row['status'] != 'succeeded' or not row['artifact_token']:
+        raise HTTPException(status_code=409, detail='Report is not ready')
+    root = (settings.artifact_dir/'reports'/str(user['id'])/str(report_id)/row['artifact_token']).resolve()
+    target = (root/filename).resolve()
+    if not target.is_relative_to(root) or not target.is_file():
+        raise HTTPException(status_code=404, detail='Report artifact not found')
+    headers = {'X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer', 'Cache-Control':'private, no-store'}
+    if target.suffix == '.html':
+        # View in a sandbox; structural evidence never executes as app-origin script.
+        headers['Content-Security-Policy'] = "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'"
+        response = FileResponse(target, media_type='text/html', headers=headers)
+    else:
+        response = FileResponse(target, filename=target.name, headers=headers)
+    access = request.query_params.get('token')
+    if access:
+        response.set_cookie('report_access', access, path=f'/api/generated-reports/{report_id}/files/', httponly=True, secure=request.url.scheme == 'https', samesite='lax', max_age=3600)
+    return response
 
 
 @app.get("/api/reports/{job_id}.json")
