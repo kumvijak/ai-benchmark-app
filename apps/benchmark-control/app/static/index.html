@@ -195,6 +195,7 @@
         <label data-help="Client timeout in seconds for runtime readiness checks and GuideLLM OpenAI HTTP requests.">Request timeout<input id="requestTimeout" type="number" value="30"></label>
         <label class="check" data-help="Enables vLLM prefix caching so repeated prompt prefixes can reuse cached KV state. Keep this explicit because it changes benchmark behavior."><input id="prefixCache" type="checkbox"><span>Prefix cache</span></label>
         <label class="check" data-help="Enables chunked prefill so long prompts can be prefetched in chunks, which may improve scheduling for mixed prompt lengths."><input id="chunkedPrefill" type="checkbox"><span>Chunked prefill</span></label>
+        <label class="check" data-help="Diagnostic mode: enables CPU worker traces and requests ZenDNN execution logs. Restart with this profile, then use Capture Kernel Trace. Performance benchmarks require a normal profile."><input id="kernelTracing" type="checkbox"><span>Enable kernel tracing (diagnostic only)</span></label>
       </div>
       <div class="actions">
         <button id="saveVllmBtn">Save vLLM Profile</button>
@@ -202,6 +203,11 @@
         <button id="stopRuntimeBtn" class="secondary">Stop Selected Runtime</button>
         <button id="refreshRuntimeBtn" class="secondary">Refresh Runtime Processes</button>
       </div>
+      <div class="actions">
+        <label>Trace concurrency<input id="traceConcurrency" type="number" min="1" max="16" value="1"></label>
+        <button id="captureTraceBtn" class="secondary">Capture Kernel Trace</button>
+      </div>
+      <p>Trace capture uses a short fixed diagnostic prompt and 64 output tokens per request. Enable tracing in a saved profile and restart it first. Select the completed trace job in Queue to download its evidence.</p>
       <table id="vllmTable"></table>
       <div class="actions">
         <button id="deleteVllmBtn" class="secondary">Delete Selected vLLM Profile</button>
@@ -304,6 +310,7 @@
       <table id="queueTable"></table>
       <div class="actions">
         <button id="deleteJobBtn" class="secondary">Delete Selected Job</button>
+        <button id="downloadTraceBtn" class="secondary" disabled>Download Kernel Trace ZIP</button>
       </div>
       <div class="job-detail">
         <div class="subhead">

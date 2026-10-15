@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import hashlib
 from dataclasses import asdict, replace
 from pathlib import Path
 import threading
@@ -28,14 +29,15 @@ def assert_serving_profile(profile, evidence):
     # The client timeout does not change the server's effective model configuration.
     expected.pop('request_timeout_seconds')
     actual = evidence.get('serving_config') or {}
-    if any(actual.get(key) != value for key, value in expected.items()):
+    if any(actual.get(key, False if key == 'kernel_tracing_enabled' else None) != value for key, value in expected.items()):
         raise RuntimeError('Running model/precision/configuration does not match the selected profile; restart the runtime')
 
 
 class Worker:
-    def __init__(self, db: Database, secrets: SecretBox):
+    def __init__(self, db: Database, secrets: SecretBox, artifact_dir: Path | None = None):
         self.db = db
         self.secrets = secrets
+        self.artifact_dir = artifact_dir
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._loop, name="benchmark-worker", daemon=True)
 
@@ -79,6 +81,8 @@ class Worker:
             result = self._start_runtime(job["owner_user_id"], payload)
         elif job["job_type"] == "stop_runtime":
             result = self._stop_runtime(job["owner_user_id"], payload)
+        elif job["job_type"] == "trace_runtime":
+            result = self._trace_runtime(job["owner_user_id"], payload)
         elif job["job_type"] == "run_benchmark":
             result = self._run_benchmark(job["owner_user_id"], payload)
         elif job["job_type"] == "provision_vm":
@@ -122,6 +126,7 @@ class Worker:
             port=int(row["port"]),
             quantization=row.get('quantization', 'none'),
             model_revision=row.get('model_revision'),
+            kernel_tracing_enabled=bool(row.get('kernel_tracing_enabled')),
         )
 
     def _health_check(self, user_id: int, payload: dict[str, Any]) -> dict[str, Any]:
@@ -354,6 +359,8 @@ class Worker:
     def _run_benchmark(self, user_id: int, payload: dict[str, Any]) -> dict[str, Any]:
         vm = self._vm(user_id, int(payload["vm_profile_id"]))
         vllm = self._vllm(user_id, int(payload["vllm_profile_id"]))
+        if vllm.kernel_tracing_enabled:
+            raise RuntimeError("Trace-enabled runtimes are diagnostic only; restart a normal profile for benchmarks")
         job_id = payload.get("_job_id")
         concurrencies = payload.get("concurrencies") or [payload.get("concurrency")]
         concurrencies = [int(value) for value in concurrencies if int(value) > 0]
@@ -432,6 +439,40 @@ SYSTEM"""
                     "artifacts": list((result.get("artifacts") or {}).keys()),
                 },
             )
+        return result
+
+    def _trace_runtime(self, user_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        from .tracing import MAX_BUNDLE_BYTES, remote_trace_command
+        profile=self._vllm(user_id,int(payload['vllm_profile_id']))
+        if not profile.kernel_tracing_enabled:
+            raise RuntimeError('Selected runtime profile does not enable kernel tracing')
+        job_id=int(payload['_job_id'])
+        self._set_job_progress(job_id,10,'trace_connecting','Checking diagnostic runtime identity')
+        with SshClient(self._vm(user_id,int(payload['vm_profile_id']))) as ssh:
+            evidence=self._runtime_evidence(ssh,profile.port)
+            assert_serving_profile(profile,evidence)
+            spec={key:payload[key] for key in ('concurrency','requests','max_tokens')}
+            spec.update(port=profile.port,model_ref=profile.model_ref,
+                        server_pid=evidence['server_pid'],server_start_ticks=evidence['server_start_ticks'],
+                        runtime_evidence={key:evidence.get(key) for key in ('backend','platform','cpu_vendor','vllm_version','torch_version','triton_version','zentorch_version','zendnn_version','serving_config','quantization_evidence')})
+            self._set_job_progress(job_id,30,'profiling','Warming up, capturing inference operations, then flushing worker traces')
+            out=ssh.run_checked(remote_trace_command(spec),timeout=2400)
+            result=json.loads(out.strip().splitlines()[-1])
+        bundle=result.pop('bundle',None)
+        result['runtime_evidence']=evidence
+        if bundle:
+            raw=base64.b64decode(bundle['content_b64'],validate=True)
+            if len(raw)>MAX_BUNDLE_BYTES or hashlib.sha256(raw).hexdigest()!=bundle['sha256']:
+                raise BenchmarkExecutionError('Trace bundle integrity/size check failed',result)
+            if self.artifact_dir is None:
+                raise BenchmarkExecutionError('Trace artifact storage is not configured',result)
+            directory=self.artifact_dir/'traces'/str(user_id)
+            directory.mkdir(parents=True,mode=0o700,exist_ok=True)
+            pending=directory/f'{job_id}.zip.part';pending.write_bytes(raw)
+            pending.replace(directory/f'{job_id}.zip')
+            result['trace_artifact']={'bytes':len(raw),'sha256':bundle['sha256'],'filename':f'kernel-trace-{job_id}.zip'}
+        if not result.get('ok'):
+            raise BenchmarkExecutionError('Diagnostic trace capture failed; available evidence retained',result)
         return result
 
     def _stop_runtime(self, user_id: int, payload: dict[str, Any]) -> dict[str, Any]:
