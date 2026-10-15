@@ -23,7 +23,8 @@
       <button class="tab" data-tab="vllm">vLLM Config</button>
       <button class="tab" data-tab="bench">Benchmarking</button>
       <button class="tab" data-tab="queue">Queue</button>
-      <button class="tab" data-tab="report">Report</button>
+      <button class="tab" data-tab="generated">Reports</button>
+      <button class="tab" data-tab="report">Native Report</button>
     </nav>
 
     <section class="tab-panel active" id="tab-auth">
@@ -182,12 +183,14 @@
         <label class="wide" data-help="VM where start, stop, and process refresh actions will run.">Apply runtime actions to VM<select id="runtimeVmSelect"></select></label>
         <label data-help="Friendly name for this vLLM runtime profile.">Name<input id="vllmName" placeholder="qwen-cpu-bf16"></label>
         <label data-help="Model identifier passed to vLLM, such as a Hugging Face repo ID or a local model path on the VM.">Model<input id="modelRef" placeholder="Qwen/Qwen3-4B-Base"></label>
-        <label data-help="Precision used by vLLM. bfloat16 is the default guide choice for supported CPUs; float32 is safer but heavier.">Dtype<select id="dtype"><option>bfloat16</option><option>float32</option><option>auto</option></select></label>
+        <label data-help="Optional immutable Hugging Face source model commit. Pin the same source revision across None, INT8, and INT4 for a comparable benchmark; leave blank to use the model's default revision.">Model revision<input id="modelRevision" placeholder="Optional source commit SHA"></label>
+        <label data-help="Model weight precision, separate from runtime dtype. None uses the original checkpoint. INT8 and INT4 require an actual CPU-compatible compressed-tensors checkpoint with the selected weight precision; changing dtype does not quantize weights.">Model precision<select id="quantization"><option value="none">None</option><option value="int8">INT8</option><option value="int4">INT4</option></select></label>
+        <label data-help="Runtime compute dtype, separate from model weight precision. INT8 and INT4 require bfloat16 for unquantized layers and outputs. None also allows float32 or auto. A dtype cast does not produce INT8 or INT4 weights.">Dtype<select id="dtype"><option>bfloat16</option><option>float32</option><option>auto</option></select></label>
         <label data-help="Port where vLLM exposes its OpenAI-compatible API on the VM. GuideLLM targets this port locally over SSH execution.">Port<input id="runtimePort" type="number" value="8000"></label>
         <label data-help="Maximum context length vLLM will serve. Lower values reduce memory pressure.">Max model len<input id="maxModelLen" type="number" value="4096"></label>
         <label data-help="Optional vLLM cap for tokens batched together. Leave empty to use vLLM's default.">Max batched tokens<input id="maxBatchedTokens" type="number" placeholder="optional"></label>
         <label data-help="Maximum concurrent sequences vLLM schedules. Lower values can protect CPU memory on smaller shapes.">Max seqs<input id="maxSeqs" type="number" value="8"></label>
-        <label data-help="CPU KV cache space in GiB reserved for vLLM. Increase for longer context or higher concurrency when memory allows.">KV cache GiB<input id="kvCache" type="number" value="40"></label>
+        <label data-help="CPU KV cache space in GiB reserved for vLLM. Leave blank for automatic sizing, which omits VLLM_CPU_KVCACHE_SPACE. Enter a positive value for an explicit memory reservation.">KV cache GiB<input id="kvCache" type="number" value="8" min="1" placeholder="Auto (leave blank)"></label>
         <label data-help="CPU cores reserved for the OS and background work instead of vLLM.">Reserved CPU<input id="reservedCpu" type="number" value="2"></label>
         <label data-help="Client timeout in seconds for runtime readiness checks and GuideLLM OpenAI HTTP requests.">Request timeout<input id="requestTimeout" type="number" value="30"></label>
         <label class="check" data-help="Enables vLLM prefix caching so repeated prompt prefixes can reuse cached KV state. Keep this explicit because it changes benchmark behavior."><input id="prefixCache" type="checkbox"><span>Prefix cache</span></label>
@@ -240,6 +243,7 @@
         <label data-help="In fixed mode, selected values are the exact GuideLLM concurrent streams. In sweep mode, the largest selected value becomes max_concurrency.">Concurrency / max sweep concurrency<select id="concurrency" class="compact-multi" multiple size="3"></select></label>
         <label data-help="Maximum requests GuideLLM may process per strategy. Keep it as a safety cap when duration is the main run limit.">Max requests per strategy<input id="maxRequests" type="number" value="10"></label>
         <label data-help="Maximum seconds GuideLLM runs each strategy. With multiple fixed concurrencies or a sweep, this applies to each strategy, not the whole job.">Max duration seconds<input id="maxDurationSeconds" type="number" value="600" min="1"></label>
+        <label data-help="Stop after this many errored requests. Leave blank to omit the max_errors constraint and continue until the request or duration limit.">Max errors<input id="maxErrors" type="number" value="5" min="1" placeholder="No guard (leave blank)"></label>
         <label data-help="Pause between GuideLLM strategies so the server can settle before the next load point.">Cooldown seconds<input id="cooldownSeconds" type="number" value="5" min="0"></label>
         <label data-help="Static seed for synthetic data generation so repeated runs are comparable.">Seed<input id="benchmarkSeed" type="number" value="42"></label>
         <label data-help="Number of GuideLLM sweep strategies. It includes synchronous baseline, throughput probe, and interpolated rate points.">Sweep size<input id="sweepSize" type="number" value="10" min="3"></label>
@@ -249,6 +253,20 @@
       <div class="actions">
         <button id="runBenchmarkBtn">Queue Benchmark</button>
       </div>
+    </section>
+
+    <section class="tab-panel" id="tab-generated">
+      <div class="section-head"><div><h2>Reports</h2><p>Generate MLCommons-style reports from retained benchmark evidence. Reports run on a dedicated queue and remain available after VM termination.</p></div><span class="pill">Offline HTML · CSV · JSON · ZIP</span></div>
+      <div class="form-grid">
+        <label>Report title<input id="generatedTitle" maxlength="160" value="CPU inference benchmark report"></label>
+        <label>Filter reports<input id="generatedFilter" type="search" placeholder="Title or report ID"></label>
+      </div>
+      <p>Choose finished attempts. Different model, precision, host and workload configurations receive separate detail pages; retries remain separate columns.</p>
+      <div class="actions"><button id="selectReportSourcesBtn" class="secondary">Select all finished attempts</button><button id="clearReportSourcesBtn" class="secondary">Clear selection</button></div>
+      <div id="generatedSources" class="report-source-list"></div>
+      <div class="actions"><button id="generateReportBtn">Queue Report</button><button id="refreshGeneratedBtn" class="secondary">Refresh reports</button></div>
+      <p id="generatedQueueStatus" aria-live="polite">Loading reporting queue…</p>
+      <div id="generatedCatalogue"></div>
     </section>
 
     <section class="tab-panel" id="tab-report">
@@ -299,5 +317,6 @@
 
   <div id="toast"></div>
   <script src="/static/app.js"></script>
+  <script src="/static/reports.js"></script>
 </body>
 </html>

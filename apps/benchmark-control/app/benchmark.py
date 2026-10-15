@@ -18,16 +18,18 @@ class GuideLLMBenchmarkSpec:
     concurrencies: list[int]
     max_requests: int
     request_timeout_seconds: int
+    max_errors: int | None = 5
     mode: str = "concurrent"
     max_duration_seconds: int = 600
     cooldown_seconds: int = 5
     seed: int = 42
     sweep_size: int = 10
     sweep_strategy_type: str = "poisson"
+    runtime_evidence: dict[str, Any] | None = None
 
 
 GUIDELLM_REMOTE_SCRIPT = r"""
-import base64, json, os, subprocess, sys, time
+import base64, importlib.metadata, json, os, subprocess, sys, time
 
 spec = json.loads(sys.stdin.read())
 job_id = spec["job_id"]
@@ -77,7 +79,6 @@ args = [
     "--profile", json.dumps(profile, separators=(",", ":")),
     "--constraint", f"kind=max_requests,count={spec['max_requests']}",
     "--constraint", f"kind=max_duration,seconds={spec['max_duration_seconds']}",
-    "--constraint", "kind=max_errors,count=5",
     "--seed", f"kind=static,value={spec['seed']}",
     "--output", f"kind=json,path={json_path}",
     "--output", f"kind=csv,path={csv_path}",
@@ -85,6 +86,12 @@ args = [
     "--label", f"workload={spec['workload_name']}",
     "--label", f"benchmark_mode={spec['mode']}",
 ]
+for key in ('backend', 'cpu_vendor', 'amx_eligible', 'amx_runtime_supported', 'amx_policy', 'vllm_version', 'torch_version', 'zentorch_version', 'zendnn_version', 'platform'):
+    value = (spec.get('runtime_evidence') or {}).get(key)
+    if value is not None:
+        args += ['--label', f'{key}={value}']
+if spec.get('max_errors') is not None:
+    args += ['--constraint', f"kind=max_errors,count={spec['max_errors']}"]
 if spec["mode"] == "sweep":
     args += ["--constraint", "kind=over_saturation,mode=enforce"]
 
@@ -117,6 +124,7 @@ for name, path, binary in [
 
 payload = {
     "returncode": proc.returncode,
+    "guidellm_version": importlib.metadata.version("guidellm"),
     "duration_seconds": duration,
     "command": args,
     "job_dir": job_dir,
@@ -157,6 +165,7 @@ def guide_spec_payload(spec: GuideLLMBenchmarkSpec, job_id: int) -> dict[str, An
         "output_tokens": spec.output_tokens,
         "concurrencies": spec.concurrencies,
         "max_requests": spec.max_requests,
+        "max_errors": spec.max_errors,
         "request_timeout_seconds": spec.request_timeout_seconds,
         "mode": spec.mode,
         "max_duration_seconds": spec.max_duration_seconds,
@@ -164,6 +173,7 @@ def guide_spec_payload(spec: GuideLLMBenchmarkSpec, job_id: int) -> dict[str, An
         "seed": spec.seed,
         "sweep_size": spec.sweep_size,
         "sweep_strategy_type": spec.sweep_strategy_type,
+        "runtime_evidence": spec.runtime_evidence,
     }
 
 
@@ -208,7 +218,17 @@ def report_markdown(result: dict[str, Any]) -> str:
     header = "| " + " | ".join(columns) + " |"
     sep = "| " + " | ".join(["---"] * len(columns)) + " |"
     body = ["| " + " | ".join(_fmt(row.get(col)) for col in columns) + " |" for row in rows]
-    return "\n".join([header, sep, *body])
+    table = "\n".join([header, sep, *body])
+    evidence = result.get('runtime_evidence')
+    if not evidence:
+        return table
+    summary = (f"Backend: {evidence['backend']} | Platform: {evidence['platform']} | "
+               f"Intel AMX runtime support: {'available' if evidence.get('amx_runtime_supported') else 'unavailable'} | "
+               f"AMX selection: automatic | "
+               f"vLLM: {evidence['vllm_version']} | PyTorch: {evidence['torch_version']}")
+    if evidence.get('zendnn_version'):
+        summary += f" | ZenTorch: {evidence['zentorch_version']} | ZenDNN: {evidence['zendnn_version']}"
+    return summary + "\n\n" + table
 
 
 def report_csv(result: dict[str, Any]) -> str:
@@ -232,7 +252,7 @@ def report_html(result: dict[str, Any]) -> str:
 
 def normalize_guidellm_result(envelope: dict[str, Any]) -> dict[str, Any]:
     artifacts = decode_guidellm_artifacts(envelope)
-    guidellm_json = None
+    guidellm_json = envelope.get("guidellm_json")
     if artifacts.get("json"):
         try:
             guidellm_json = json.loads(artifacts["json"])
@@ -326,8 +346,8 @@ def _guidellm_benchmark_rows(raw: Any, spec: dict[str, Any]) -> list[dict[str, A
             "itl_ms_p50": percentile("inter_token_latency_ms", "p50"),
             "itl_ms_p95": percentile("inter_token_latency_ms", "p95"),
             "tpot_ms_p50": percentile("time_per_output_token_ms", "p50"),
-            "e2e_ms_p50": percentile("request_latency", "p50"),
-            "e2e_ms_p95": percentile("request_latency", "p95"),
+            "e2e_ms_p50": (percentile("request_latency", "p50") * 1000 if percentile("request_latency", "p50") is not None else None),
+            "e2e_ms_p95": (percentile("request_latency", "p95") * 1000 if percentile("request_latency", "p95") is not None else None),
             "output_tokens_per_second": mean("output_tokens_per_second"),
             "total_tokens_per_second": mean("tokens_per_second"),
             "duration_seconds": benchmark.get("duration"),

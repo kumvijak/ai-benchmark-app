@@ -183,6 +183,15 @@ async function refreshVms() {
 
 async function refreshVmSetup() {
   const data = await api("/api/vm-setup-status");
+  data.forEach(row => {
+    const evidence = JSON.parse(row.runtime_evidence || "{}");
+    row.runtime_backend = evidence.error || evidence.platform || "Not verified";
+    row.torch_version = evidence.torch_version || "";
+    row.zentorch_version = evidence.zentorch_version || "";
+    row.zendnn_version = evidence.zendnn_version || "";
+    row.cpu_vendor = evidence.cpu_vendor || "";
+    row.amx_eligible = evidence.amx_eligible ? "Available" : "Unavailable";
+  });
   rows("vmSetupTable", [
     { key: "vm_profile_id", label: "VM ID" },
     { key: "name", label: "Name" },
@@ -190,6 +199,12 @@ async function refreshVmSetup() {
     { key: "root_usage_after", label: "Root Usage" },
     { key: "vllm_status", label: "vLLM", render: (x) => `<span class="status-${x.vllm_status}">${x.vllm_status}</span>` },
     { key: "vllm_version", label: "vLLM Version" },
+    { key: "runtime_backend", label: "Platform" },
+    { key: "cpu_vendor", label: "CPU vendor" },
+    { key: "amx_eligible", label: "AMX capability" },
+    { key: "torch_version", label: "PyTorch" },
+    { key: "zentorch_version", label: "ZenTorch" },
+    { key: "zendnn_version", label: "ZenDNN" },
     { key: "benchmark_status", label: "GuideLLM", render: (x) => `<span class="status-${x.benchmark_status}">${x.benchmark_status}</span>` },
     { key: "benchmark_version", label: "GuideLLM Version" },
     { key: "last_setup_at", label: "Updated" }
@@ -236,6 +251,36 @@ async function refreshAuthProfiles() {
   }
 }
 
+function modelPrecisionLabel(value) {
+  return value === "int8" ? "INT8" : value === "int4" ? "INT4" : "None";
+}
+
+function syncModelPrecisionDtype() {
+  const quantized = ["int8", "int4"].includes($("quantization").value);
+  for (const option of $("dtype").options) {
+    option.disabled = quantized && option.value !== "bfloat16";
+  }
+  if (quantized) $("dtype").value = "bfloat16";
+}
+
+function fillVllmForm(item) {
+  $("vllmName").value = item.name;
+  $("modelRef").value = item.model_ref;
+  $("modelRevision").value = item.model_revision ?? "";
+  $("quantization").value = item.quantization || "none";
+  $("dtype").value = item.dtype;
+  $("runtimePort").value = item.port;
+  $("maxModelLen").value = item.max_model_len;
+  $("maxBatchedTokens").value = item.max_num_batched_tokens ?? "";
+  $("maxSeqs").value = item.max_num_seqs;
+  $("kvCache").value = item.cpu_kvcache_space_gib ?? "";
+  $("reservedCpu").value = item.reserved_cpu;
+  $("prefixCache").checked = !!item.prefix_cache_enabled;
+  $("chunkedPrefill").checked = !!item.chunked_prefill_enabled;
+  $("requestTimeout").value = item.request_timeout_seconds;
+  syncModelPrecisionDtype();
+}
+
 async function refreshVllm() {
   const data = await api("/api/vllm-profiles");
   vllmProfilesCache = data;
@@ -244,12 +289,14 @@ async function refreshVllm() {
     { key: "id", label: "ID" },
     { key: "name", label: "Name" },
     { key: "model_ref", label: "Model" },
+    { key: "quantization", label: "Model precision", render: (x) => modelPrecisionLabel(x.quantization) },
     { key: "dtype", label: "Dtype" },
     { key: "port", label: "Port" },
     { key: "max_model_len", label: "Max Len" },
-    { key: "max_num_seqs", label: "Seqs" }
-  ], data, (item) => { selectedVllm = item.id; }, (item) => item.id === selectedVllm);
-  fillProfileSelect("benchmarkVllmSelect", data, currentSelectNumber("benchmarkVllmSelect") || selectedVllm, (x) => `${x.name} | ${x.model_ref} | port ${x.port}`, "No vLLM profiles");
+    { key: "max_num_seqs", label: "Seqs" },
+    { key: "cpu_kvcache_space_gib", label: "KV GiB", render: (x) => x.cpu_kvcache_space_gib == null ? "Auto" : x.cpu_kvcache_space_gib }
+  ], data, (item) => { selectedVllm = item.id; fillVllmForm(item); }, (item) => item.id === selectedVllm);
+  fillProfileSelect("benchmarkVllmSelect", data, currentSelectNumber("benchmarkVllmSelect") || selectedVllm, (x) => `${x.name} | ${x.model_ref} | ${modelPrecisionLabel(x.quantization)} | port ${x.port}`, "No vLLM profiles");
 }
 
 async function refreshJobs() {
@@ -391,6 +438,13 @@ function renderReportTable(result) {
   const container = $("reportOutput");
   container.classList.remove("empty");
   container.innerHTML = "";
+  if (result.runtime_evidence) {
+    const evidence = result.runtime_evidence;
+    const summary = document.createElement("p");
+    summary.textContent = `Backend: ${evidence.backend} | Platform: ${evidence.platform} | Intel AMX runtime support: ${evidence.amx_runtime_supported ? "available" : "unavailable"} | AMX selection: automatic | vLLM: ${evidence.vllm_version} | PyTorch: ${evidence.torch_version}`;
+    if (evidence.zendnn_version) summary.textContent += ` | ZenTorch: ${evidence.zentorch_version} | ZenDNN: ${evidence.zendnn_version}`;
+    container.appendChild(summary);
+  }
   const rows = reportRows(result);
   const present = new Set(rows.flatMap((row) => Object.keys(row)));
   const table = document.createElement("table");
@@ -748,6 +802,7 @@ async function loadOciOptions() {
   fillSelect("computeCompartment", compartments, (x) => `${x.name} | ${x.id}`);
   fillSelect("networkCompartment", compartments, (x) => `${x.name} | ${x.id}`);
   fillSelect("ociShape", shapes, (x) => x.name, (x) => x.name);
+  $("ociShape").value = defaults.default_deployment.shape;
   $("ociOcpus").value = defaults.default_deployment.ocpus;
   $("ociMemory").value = defaults.default_deployment.memory_gb;
   $("ociBootVolume").value = defaults.default_deployment.boot_volume_gb;
@@ -1025,16 +1080,19 @@ $("destroyVmBtn").onclick = async () => {
 
 $("saveVllmBtn").onclick = async () => {
   const maxBatched = $("maxBatchedTokens").value;
+  const kvCache = $("kvCache").value;
   await api("/api/vllm-profiles", {
     method: "POST",
     body: JSON.stringify({
       name: $("vllmName").value,
       model_ref: $("modelRef").value,
+      model_revision: $("modelRevision").value.trim() || null,
+      quantization: $("quantization").value,
       dtype: $("dtype").value,
       max_model_len: Number($("maxModelLen").value),
       max_num_batched_tokens: maxBatched ? Number(maxBatched) : null,
       max_num_seqs: Number($("maxSeqs").value),
-      cpu_kvcache_space_gib: Number($("kvCache").value),
+      cpu_kvcache_space_gib: kvCache ? Number(kvCache) : null,
       reserved_cpu: Number($("reservedCpu").value),
       prefix_cache_enabled: $("prefixCache").checked,
       chunked_prefill_enabled: $("chunkedPrefill").checked,
@@ -1064,6 +1122,8 @@ $("benchmarkVmSelect").onchange = () => {
   selectedBenchmarkVm = currentSelectNumber("benchmarkVmSelect");
 };
 $("benchmarkVllmSelect").onchange = () => {};
+$("quantization").onchange = syncModelPrecisionDtype;
+syncModelPrecisionDtype();
 $("refreshRuntimeBtn").onclick = () => refreshRuntimeProcesses().then(() => toast("Runtime processes refreshed"));
 
 $("startRuntimeBtn").onclick = async () => {
@@ -1071,7 +1131,7 @@ $("startRuntimeBtn").onclick = async () => {
   if (!vmId || !selectedVllm) return toast("Select VM and vLLM profiles first");
   const data = await api("/api/runtime/start", {
     method: "POST",
-    body: JSON.stringify({ vm_profile_id: vmId, vllm_profile_id: selectedVllm, readiness_timeout_seconds: 180 })
+    body: JSON.stringify({ vm_profile_id: vmId, vllm_profile_id: selectedVllm, readiness_timeout_seconds: 900 })
   });
   toast(`Runtime start queued as job ${data.job_id}`);
   await refreshJobs();
@@ -1109,6 +1169,7 @@ $("runBenchmarkBtn").onclick = async () => {
         max_requests: Number($("maxRequests").value),
         benchmark_mode: $("benchmarkMode").value,
         max_duration_seconds: Number($("maxDurationSeconds").value),
+        max_errors: $("maxErrors").value ? Number($("maxErrors").value) : null,
         cooldown_seconds: Number($("cooldownSeconds").value),
         seed: Number($("benchmarkSeed").value),
         sweep_size: Number($("sweepSize").value),

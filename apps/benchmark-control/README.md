@@ -1,8 +1,6 @@
 # AI Inference Benchmark Control
 
-Containerized control plane for OCI VM provisioning, SSH-based vLLM setup, and GuideLLM benchmark execution on Ubuntu CPU hosts. The UI uses plain JavaScript, the API uses FastAPI, and a single background worker processes a SQLite job queue.
-
-The image builds from a digest-pinned official Python base and installs its requirements, OCI SDK, and OpenSSH client explicitly. It does not depend on an older locally built application image.
+Initial containerized control plane for OCI VM provisioning, SSH-based vLLM setup, and benchmark execution on Ubuntu hosts.
 
 ## Run Locally
 
@@ -13,11 +11,7 @@ export APP_LOCAL_USER_EMAIL="operator@example.com"
 docker compose up --build
 ```
 
-Open `http://localhost:18080` unless you set a different `APP_PORT`. Compose binds to workstation loopback because this operator build supports automatic local session creation.
-
-Keep `APP_SECRET` stable across restarts: it encrypts saved credentials. Compose stores application data in a named volume at `/data`; `docker compose down` keeps it, while `docker compose down --volumes` deletes it.
-
-To stop: `docker compose down`. To inspect startup: `docker compose logs benchmark-control`.
+Open `http://localhost:18080` unless you set a different `APP_PORT`.
 
 ## What This Version Does
 
@@ -44,7 +38,7 @@ The remote host must have:
 - For new VMs: a validated OCI auth profile, selected compartment/AD/network/image values, and an SSH public key.
 - For existing VMs: SSH reachable from the container host and an uploaded private key file.
 - `python3`, `pip`, and `curl`; missing packages are installed during SSH validation on Ubuntu hosts.
-- `vllm==0.30.0+cpu` available on `PATH` for runtime start; missing, wrong-version, or non-CPU-ready vLLM is repaired into a managed SSH-user virtual environment at `~/.aig-vllm` using the release-specific CPU wheel index.
+- `vllm==0.31.0+cpu` with the vendor-appropriate backend (AMD: ZenTorch 2.13.0.1 / native ZenDNN 6.0.1; Intel: CpuPlatform) available in the managed environment for runtime start; missing, wrong-version, or non-CPU-ready vLLM is repaired into a managed SSH-user virtual environment at `~/.aig-vllm` using the release-specific CPU wheel index.
 - `guidellm==0.8.0` installed as the benchmark library readiness check; missing or wrong-version GuideLLM is installed into the same managed runtime environment during SSH validation.
 - An unencrypted private key for this initial build. Passphrase-protected keys are rejected explicitly rather than handled insecurely.
 
@@ -72,24 +66,64 @@ The Report tab renders successful benchmark jobs as a normalized table built fro
 
 See [docs/vm-provisioning.md](docs/vm-provisioning.md) for lifecycle and cleanup details.
 
-## Container Verification
+## Local Validation Completed
 
-Verified on 9 October 2026 after folder cleanup:
+- Container image builds locally as `aig-benchmark-control:local`.
+- Unit tests pass inside the image.
+- The app runs locally as `aig-benchmark-control-dev`.
+- API health endpoint returns `{"status":"ok"}`.
+- Local UI session bootstrap works without register/login.
+- Authentication validation endpoint returns explicit OCI Python SDK auth results.
+- User Profile validation requires an explicit OCI config profile header and uploaded matching private key.
+- Registration, login, VM profile creation, vLLM profile creation, ownership rejection, queued job processing, and failed benchmark report rejection were tested against the running container.
+- Live SSH/vLLM benchmark validation is pending your Ubuntu host details and model name.
 
-- Fresh Docker build with explicit dependencies; Python compilation and `pip check` pass.
-- 11 existing core tests pass inside the image.
-- 4 HTTP integration tests pass: health/static assets/auth, profile ownership and deletion, worker failure processing, and report routes using explicit test fixtures.
-- Compose startup and persistent profiles/sessions after restart verified with an isolated disposable project.
-- JavaScript syntax check passes.
+## Model precision
 
-Run the checks after building:
+Version 0.2.1 adds None, INT8 and INT4 to vLLM profiles. Quantized profiles derive a checkpoint from the original model and pinned Hugging Face commit; the public served-model name stays unchanged. Leaving the revision blank resolves and records an immutable source commit before conversion. Quantized modes use BF16 for remaining floating-point layers.
 
-```bash
-docker compose build
-docker run --rm --network none --entrypoint python aig-inference-app-v1:local -m unittest discover -s app/tests -v
-docker run --rm --network none --entrypoint python aig-inference-app-v1:local -m app.tests.container_smoke
-```
+INT8 uses signed 8-bit decoder attention/MLP weights, per-output-channel scales and dynamic per-token 8-bit activations (W8A8). INT4 uses packed signed 4-bit decoder weights with group size 128 and BF16 activations (W4A16). Embeddings, normalization, output heads and Qwen vision layers retain their original values. The converter currently supports Qwen/Qwen3-VL-8B-Instruct, Qwen/Qwen3-4B-Base, mistralai/Mistral-7B-v0.1 and google/gemma-7b. It validates layer coverage, storage, scales, source identity and checkpoint hashes before launch, and never falls back to an unquantized checkpoint.
 
-These local checks do not provision OCI resources or run remote models. Actual OCI authentication, new-VM lifecycle, remote SSH setup, vLLM startup, and real GuideLLM workloads require the selected tenancy/host/model and remain `NOT_RUN` in this verification. Test report fixtures are not benchmark results.
+Leave KV cache GiB blank for automatic CPU KV allocation. Leave Max errors blank to omit the GuideLLM error-stop constraint; request-count and duration limits remain active. Existing profiles preserve their previous numeric cache and error settings.
 
-See [validation results](docs/container-validation.md) and the [application mind map](docs/application-mind-map.md). The root `plan.md` is a broader target design, not the implemented stack.
+The CPU installer pins vLLM 0.31.0+cpu and Torch 2.13.0+cpu. CPU Triton 3.8.0+cpu is obtained from the direct wheel URL declared by vLLM rather than a separate package-index lookup, and its installed version is verified. Quantization accuracy is not measured by the performance benchmark.
+
+
+## CPU vendor selection
+
+The default CPU runtime uses vLLM 0.31.0+cpu, PyTorch 2.13.0+cpu and CPU
+Triton 3.8.0+cpu on Ubuntu 24.04/Python 3.12. Hardware is detected inside the
+VM; another backend is never silently substituted.
+
+- AMD requires exposed AVX-512, ZenTorch 2.13.0.1, native ZenDNN 6.0.1 build
+  metadata and native ZenCpuPlatform. The pinned PyPI wheel is installed and
+  its native build metadata and binary SHA-256 hashes are recorded.
+- Intel requires exposed AVX2 and native CpuPlatform. ZenTorch is not installed
+  by Intel setup. Capability evidence includes AVX-512, BF16 and AMX flags.
+- Other vendors or missing required instructions fail setup explicitly.
+
+The original approved AMD E6 and Intel Standard4 shapes are available again.
+E6 remains the new-VM default. Intel AMX capability is detected and recorded,
+while PyTorch, oneDNN and vLLM select applicable kernels automatically. The
+control app does not force vLLM's experimental `VLLM_CPU_SGL_KERNEL` path.
+Operator-level AMX use still depends on the model, precision, shapes and runtime
+dispatch, so confirm it separately when measuring kernel behavior.
+
+Setup and launch share tcmalloc/LLVM OpenMP 18 preload and compile settings.
+Healthy managed environments are preserved and GuideLLM uses the same package
+constraints. AMD native metadata mismatches fail rather than assume a version.
+
+Rebuild the control container, run full VM validation and restart existing
+runtimes before benchmarking. A launch verifier runs inside the server process,
+records detected vendor/platform/version/AMX capabilities and process identity, then
+invokes the vLLM CLI. Benchmarks require matching activation evidence from a
+live server and include it in job results and GuideLLM artifact labels.
+BF16 remains the default; validate quantized model paths separately.
+
+## Generated reports (0.3.0)
+
+The **Reports** tab queues MLCommons-style offline report collections with four performance charts, configuration detail pages, side-by-side concurrency/retry tables, evidence warnings, and CSV/JSON/ZIP downloads. Finished failed attempts can be included. **Native Report** retains the existing GuideLLM exports.
+
+Docker Compose starts a dedicated `report-worker` service using the shared data volume. Single-process local development defaults to an independent embedded reporting thread. Reports use immutable evidence snapshots and do not require live benchmark VMs. Restart existing inference runtimes after upgrading before running new benchmarks: serving-model/precision matching is now required.
+
+See [Reports module](docs/reporting.md) for usage, queue recovery, artifact storage, API endpoints and measurement limitations. Native timing is not independently validated by this first version; reconstructed throughput is withheld.
