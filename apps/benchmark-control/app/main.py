@@ -4,13 +4,13 @@ import json
 import os
 from pathlib import Path
 import tempfile
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 import urllib.request
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from .benchmark import normalize_guidellm_result, report_csv, report_html, report_markdown
 from .config import get_settings
@@ -26,7 +26,7 @@ db.init()
 secret_box = SecretBox(settings.app_secret)
 worker = Worker(db, secret_box)
 
-app = FastAPI(title="AI Inference Benchmark Control", version="0.1.0")
+app = FastAPI(title="AI Inference Benchmark Control", version="0.2.1")
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
 
@@ -76,22 +76,30 @@ class OciVmRequest(BaseModel):
 class VllmProfileRequest(BaseModel):
     name: str
     model_ref: str
-    dtype: str = "bfloat16"
+    dtype: Literal['bfloat16', 'float32', 'float16', 'auto'] = "bfloat16"
+    quantization: Literal['none', 'int8', 'int4'] = 'none'
+    model_revision: str | None = Field(default=None, min_length=1)
     max_model_len: int = Field(default=4096, ge=1)
     max_num_batched_tokens: int | None = Field(default=None, ge=1)
     max_num_seqs: int = Field(default=8, ge=1)
-    cpu_kvcache_space_gib: int = Field(default=40, ge=1)
+    cpu_kvcache_space_gib: int | None = Field(default=8, ge=1)
     reserved_cpu: int = Field(default=2, ge=0)
     prefix_cache_enabled: bool = False
     chunked_prefill_enabled: bool = False
     request_timeout_seconds: int = Field(default=30, ge=1)
     port: int = Field(default=8000, ge=1, le=65535)
 
+    @model_validator(mode='after')
+    def validate_quantized_dtype(self):
+        if self.quantization != 'none' and self.dtype != 'bfloat16':
+            raise ValueError('CPU INT8/INT4 profiles require bfloat16 for floating-point layers and outputs')
+        return self
+
 
 class StartRuntimeRequest(BaseModel):
     vm_profile_id: int
     vllm_profile_id: int
-    readiness_timeout_seconds: int = Field(default=180, ge=10)
+    readiness_timeout_seconds: int = Field(default=900, ge=10)
 
 
 class StopRuntimeRequest(BaseModel):
@@ -109,6 +117,7 @@ class BenchmarkRequest(BaseModel):
     concurrency: int | None = Field(default=None, ge=1)
     concurrencies: list[int] | None = None
     max_requests: int = Field(ge=1, le=10000)
+    max_errors: int | None = Field(default=5, ge=1)
     benchmark_mode: str = "concurrent"
     max_duration_seconds: int = Field(default=600, ge=1, le=86400)
     cooldown_seconds: int = Field(default=5, ge=0, le=3600)
@@ -153,7 +162,7 @@ def index() -> FileResponse:
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok"}
+    return {"status": "ok", "version": app.version}
 
 
 @app.post("/api/local-session")
@@ -269,7 +278,7 @@ def list_vm_setup_status(user: dict[str, Any] = Depends(current_user)) -> list[d
         """
         SELECT s.vm_profile_id, v.name, v.host, s.root_expand_status, s.root_device,
                s.root_usage_before, s.root_usage_after, s.vllm_status, s.vllm_version,
-               s.benchmark_status, s.benchmark_version, s.python_path, s.pip_path, s.curl_path, s.last_setup_at
+               s.benchmark_status, s.benchmark_version, s.runtime_evidence, s.python_path, s.pip_path, s.curl_path, s.last_setup_at
         FROM vm_setup_status s
         JOIN vm_profiles v ON v.id=s.vm_profile_id
         WHERE s.owner_user_id=?
@@ -464,13 +473,15 @@ def create_vllm_profile(req: VllmProfileRequest, user: dict[str, Any] = Depends(
         INSERT INTO vllm_profiles(
           owner_user_id, name, model_ref, dtype, max_model_len, max_num_batched_tokens,
           max_num_seqs, cpu_kvcache_space_gib, reserved_cpu, prefix_cache_enabled,
-          chunked_prefill_enabled, request_timeout_seconds, port
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          chunked_prefill_enabled, request_timeout_seconds, port, quantization,
+          model_revision, cpu_kvcache_auto
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             user["id"], req.name, req.model_ref, req.dtype, req.max_model_len, req.max_num_batched_tokens,
-            req.max_num_seqs, req.cpu_kvcache_space_gib, req.reserved_cpu,
+            req.max_num_seqs, req.cpu_kvcache_space_gib or 0, req.reserved_cpu,
             int(req.prefix_cache_enabled), int(req.chunked_prefill_enabled), req.request_timeout_seconds, req.port,
+            req.quantization, req.model_revision, int(req.cpu_kvcache_space_gib is None),
         ),
     )
     db.audit(user["id"], "created", "vllm_profile", int(cur.lastrowid), {"name": req.name, "model_ref": req.model_ref})
@@ -482,8 +493,9 @@ def list_vllm_profiles(user: dict[str, Any] = Depends(current_user)) -> list[dic
     return db.all(
         """
         SELECT id, name, model_ref, dtype, max_model_len, max_num_batched_tokens, max_num_seqs,
-               cpu_kvcache_space_gib, reserved_cpu, prefix_cache_enabled, chunked_prefill_enabled,
-               request_timeout_seconds, port
+               CASE WHEN cpu_kvcache_auto=1 THEN NULL ELSE cpu_kvcache_space_gib END AS cpu_kvcache_space_gib,
+               reserved_cpu, prefix_cache_enabled, chunked_prefill_enabled,
+               request_timeout_seconds, port, quantization, model_revision
         FROM vllm_profiles WHERE owner_user_id=? ORDER BY id
         """,
         (user["id"],),
@@ -513,7 +525,7 @@ def list_runtime_processes(vm_profile_id: int, user: dict[str, Any] = Depends(cu
     script = """
 import json, os, re, subprocess
 rows = []
-proc = subprocess.run(["pgrep", "-af", "[v]llm serve"], text=True, capture_output=True)
+proc = subprocess.run(["pgrep", "-af", "[v]llm serve|[v]llm-launch-[0-9]+[.]py serve"], text=True, capture_output=True)
 for line in proc.stdout.splitlines():
     parts = line.split(" ", 1)
     if not parts:

@@ -18,12 +18,14 @@ class GuideLLMBenchmarkSpec:
     concurrencies: list[int]
     max_requests: int
     request_timeout_seconds: int
+    max_errors: int | None = 5
     mode: str = "concurrent"
     max_duration_seconds: int = 600
     cooldown_seconds: int = 5
     seed: int = 42
     sweep_size: int = 10
     sweep_strategy_type: str = "poisson"
+    runtime_evidence: dict[str, Any] | None = None
 
 
 GUIDELLM_REMOTE_SCRIPT = r"""
@@ -77,7 +79,6 @@ args = [
     "--profile", json.dumps(profile, separators=(",", ":")),
     "--constraint", f"kind=max_requests,count={spec['max_requests']}",
     "--constraint", f"kind=max_duration,seconds={spec['max_duration_seconds']}",
-    "--constraint", "kind=max_errors,count=5",
     "--seed", f"kind=static,value={spec['seed']}",
     "--output", f"kind=json,path={json_path}",
     "--output", f"kind=csv,path={csv_path}",
@@ -85,6 +86,12 @@ args = [
     "--label", f"workload={spec['workload_name']}",
     "--label", f"benchmark_mode={spec['mode']}",
 ]
+for key in ('backend', 'cpu_vendor', 'amx_eligible', 'amx_runtime_supported', 'amx_policy', 'vllm_version', 'torch_version', 'zentorch_version', 'zendnn_version', 'platform'):
+    value = (spec.get('runtime_evidence') or {}).get(key)
+    if value is not None:
+        args += ['--label', f'{key}={value}']
+if spec.get('max_errors') is not None:
+    args += ['--constraint', f"kind=max_errors,count={spec['max_errors']}"]
 if spec["mode"] == "sweep":
     args += ["--constraint", "kind=over_saturation,mode=enforce"]
 
@@ -157,6 +164,7 @@ def guide_spec_payload(spec: GuideLLMBenchmarkSpec, job_id: int) -> dict[str, An
         "output_tokens": spec.output_tokens,
         "concurrencies": spec.concurrencies,
         "max_requests": spec.max_requests,
+        "max_errors": spec.max_errors,
         "request_timeout_seconds": spec.request_timeout_seconds,
         "mode": spec.mode,
         "max_duration_seconds": spec.max_duration_seconds,
@@ -164,6 +172,7 @@ def guide_spec_payload(spec: GuideLLMBenchmarkSpec, job_id: int) -> dict[str, An
         "seed": spec.seed,
         "sweep_size": spec.sweep_size,
         "sweep_strategy_type": spec.sweep_strategy_type,
+        "runtime_evidence": spec.runtime_evidence,
     }
 
 
@@ -208,7 +217,17 @@ def report_markdown(result: dict[str, Any]) -> str:
     header = "| " + " | ".join(columns) + " |"
     sep = "| " + " | ".join(["---"] * len(columns)) + " |"
     body = ["| " + " | ".join(_fmt(row.get(col)) for col in columns) + " |" for row in rows]
-    return "\n".join([header, sep, *body])
+    table = "\n".join([header, sep, *body])
+    evidence = result.get('runtime_evidence')
+    if not evidence:
+        return table
+    summary = (f"Backend: {evidence['backend']} | Platform: {evidence['platform']} | "
+               f"Intel AMX runtime support: {'available' if evidence.get('amx_runtime_supported') else 'unavailable'} | "
+               f"AMX selection: automatic | "
+               f"vLLM: {evidence['vllm_version']} | PyTorch: {evidence['torch_version']}")
+    if evidence.get('zendnn_version'):
+        summary += f" | ZenTorch: {evidence['zentorch_version']} | ZenDNN: {evidence['zendnn_version']}"
+    return summary + "\n\n" + table
 
 
 def report_csv(result: dict[str, Any]) -> str:

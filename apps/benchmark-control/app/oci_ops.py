@@ -14,6 +14,7 @@ DOC_APPROVED_SHAPES = (
 )
 
 DEFAULT_VM_DEPLOYMENT = {
+    "shape": "VM.Standard.E6.Ax.Flex",
     "ocpus": 16.0,
     "memory_gb": 64.0,
     "boot_volume_gb": 200,

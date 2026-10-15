@@ -30,10 +30,10 @@ Every VM validation now performs the following setup before marking the profile 
 1. Records current root filesystem usage with `df -h /`.
 2. Expands the root partition with `growpart` and grows the mounted filesystem with `resize2fs` or `xfs_growfs` so the OS can use the full boot disk.
 3. Installs missing Ubuntu packages required by this build: `python3-pip`, `python3-venv`, and `curl`.
-4. Installs or repairs CPU-capable `vllm==0.30.0+cpu` in the SSH user's managed virtual environment at `~/.aig-vllm` from the release-specific CPU wheel index.
-5. Verifies the vLLM version, CPU platform detection, and native `vllm._C` extension import before marking vLLM ready.
+4. Installs or repairs CPU-capable `vllm==0.31.0+cpu` in the SSH user's managed virtual environment at `~/.aig-vllm` from the release-specific CPU wheel index.
+5. Verifies the pinned vLLM/Torch versions and vendor-specific platform (AMD: ZenTorch/native ZenDNN and ZenCpuPlatform; Intel: CpuPlatform), and `vllm._C` extension import before marking vLLM ready.
 6. Installs or repairs `guidellm==0.8.0` in the same managed runtime environment.
-6. Stores setup status, detected versions, and root usage after setup in the VM Setup Status table on the VM Connection tab.
+7. Stores setup status, detected versions, and root usage after setup in the VM Setup Status table on the VM Connection tab.
 
 Setup uses the selected VM profile and does not substitute hosts, credentials, packages, models, or endpoints.
 
@@ -58,3 +58,36 @@ Destroy is queued as a `destroy_vm` job and calls OCI terminate with `preserve_b
 - The app does not choose a model, endpoint, host, compartment, VCN, subnet, or image silently.
 - Ubuntu image options are loaded from OCI for Canonical Ubuntu 24.04 only. The user must choose an image compatible with the selected guide-approved shape.
 - Benchmark and runtime work only use user-selected VM and vLLM profiles.
+
+
+## CPU vendor selection
+
+The default CPU runtime uses vLLM 0.31.0+cpu, PyTorch 2.13.0+cpu and CPU
+Triton 3.8.0+cpu on Ubuntu 24.04/Python 3.12. Hardware is detected inside the
+VM; another backend is never silently substituted.
+
+- AMD requires exposed AVX-512, ZenTorch 2.13.0.1, native ZenDNN 6.0.1 build
+  metadata and native ZenCpuPlatform. The pinned PyPI wheel is installed and
+  its native build metadata and binary SHA-256 hashes are recorded.
+- Intel requires exposed AVX2 and native CpuPlatform. ZenTorch is not installed
+  by Intel setup. Capability evidence includes AVX-512, BF16 and AMX flags.
+- Other vendors or missing required instructions fail setup explicitly.
+
+The original approved AMD E6 and Intel Standard4 shapes are available again.
+E6 remains the new-VM default. Existing runtime profiles migrate with Intel
+AMX kernels disabled. Enable the experimental Intel AMX checkbox explicitly
+for small-batch kernels; launch requires an Intel CPU, unquantized BF16 weights, amx_tile and
+amx_bf16 flags, and Linux permission for AMX tile data. Compatible weight shapes
+are still required by vLLM. Enabling the option does not prove every operator
+uses AMX; confirm operator-level behavior separately when measuring it.
+
+Setup and launch share tcmalloc/LLVM OpenMP 18 preload and compile settings.
+Healthy managed environments are preserved and GuideLLM uses the same package
+constraints. AMD native metadata mismatches fail rather than assume a version.
+
+Rebuild the control container, run full VM validation and restart existing
+runtimes before benchmarking. A launch verifier runs inside the server process,
+records detected vendor/platform/version/AMX settings and process identity, then
+invokes the vLLM CLI. Benchmarks require matching activation evidence from a
+live server and include it in job results and GuideLLM artifact labels.
+BF16 remains the default; validate quantized model paths separately.

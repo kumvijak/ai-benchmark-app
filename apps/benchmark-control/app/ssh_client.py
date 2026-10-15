@@ -60,10 +60,19 @@ class SshClient:
             "StrictHostKeyChecking=accept-new",
             "-o",
             f"ConnectTimeout={self.timeout}",
+            "-o",
+            "ConnectionAttempts=1",
+            "-o",
+            "ServerAliveInterval=5",
+            "-o",
+            "ServerAliveCountMax=2",
             remote,
             command,
         ]
-        proc = subprocess.run(args, text=True, capture_output=True, timeout=timeout)
+        try:
+            proc = subprocess.run(args, text=True, capture_output=True, timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            return 124, exc.stdout or "", exc.stderr or f"SSH command timed out after {timeout} seconds"
         return proc.returncode, proc.stdout, proc.stderr
 
     def run_checked(self, command: str, timeout: int = 60) -> str:
@@ -101,12 +110,20 @@ print(json.dumps(payload))
 PY"""
 
 
+import base64
+
+from .runtime import build_runtime_check_script
+
+
 VM_SETUP_SCRIPT = r"""python3 - <<'PY'
-import json, os, re, shutil, subprocess, time
+import base64, json, os, re, shutil, subprocess, sys, time
 
 log = []
-VLLM_VERSION = "0.30.0"
+VLLM_VERSION = "0.31.0"
 GUIDELLM_VERSION = "0.8.0"
+RUNTIME_CHECK = base64.b64decode("__RUNTIME_CHECK__").decode()
+CONSTRAINTS = "vllm==0.31.0+cpu\ntorch==2.13.0+cpu\ntriton==3.8.0+cpu\ntransformers==5.17.0\nnumpy==2.3.5\nsetuptools==77.0.3\ncompressed-tensors==0.17.0\n"
+os.environ.pop("LD_PRELOAD", None)
 
 def sh(cmd, timeout=900):
     started = time.time()
@@ -143,7 +160,46 @@ result = {
     "python_path": shutil.which("python3"),
     "pip_path": shutil.which("pip3"),
     "curl_path": shutil.which("curl"),
+    "cpu_acceleration": {},
+    "vllm_install_variant": None,
+    "ld_preload": None,
 }
+
+cpu_info = output("lscpu")
+cpu_flags = output("lscpu | awk -F: '/Flags|Features/ {print tolower($2)}' | tr ' ' '\\n' | sort -u | tr '\\n' ' '")
+cpu_vendor = output("lscpu | awk -F: '/Vendor ID|Model name/ {print $2; exit}'").strip()
+is_amd = "authenticamd" in cpu_info.lower() or " amd " in f" {cpu_info.lower()} "
+is_intel = "genuineintel" in cpu_info.lower() or " intel" in cpu_info.lower()
+zen_eligible = is_amd and "avx512f" in cpu_flags
+amx_eligible = is_intel and "amx_tile" in cpu_flags and "amx_bf16" in cpu_flags
+result["cpu_acceleration"] = {
+    "vendor": cpu_vendor,
+    "amd_zen_eligible": zen_eligible,
+    "intel_amx_eligible": amx_eligible,
+    "has_avx512f": "avx512f" in cpu_flags,
+    "has_avx2": "avx2" in cpu_flags,
+    "has_amx_tile": "amx_tile" in cpu_flags,
+    "has_amx_bf16": "amx_bf16" in cpu_flags,
+}
+
+intel_eligible = is_intel and 'avx2' in cpu_flags
+if not (zen_eligible or intel_eligible):
+    result.update(ok=False, vllm_status="unsupported_hardware",
+                  error="AMD requires AVX-512; Intel requires AVX2 exposed to the guest", log=log)
+    result["runtime_evidence"] = {"error": result["error"]}
+    print(json.dumps(result))
+    raise SystemExit(0)
+
+if is_amd:
+    CONSTRAINTS += "zentorch==2.13.0.1\n"
+zentorch_requirement = "'zentorch==2.13.0.1' " if is_amd else ""
+
+if sys.version_info[:2] != (3, 12):
+    result.update(ok=False, vllm_status="unsupported_python",
+                  error="The pinned default runtime requires Python 3.12 (Ubuntu 24.04)", log=log)
+    result["runtime_evidence"] = {"error": result["error"]}
+    print(json.dumps(result))
+    raise SystemExit(0)
 
 source = output("findmnt -n -o SOURCE /").splitlines()[-1:] or [""]
 source = source[0]
@@ -164,7 +220,7 @@ else:
     result["root_expand_status"] = "skipped_unsupported_root_device"
 
 sh("sudo DEBIAN_FRONTEND=noninteractive apt-get update", timeout=900)
-sh("sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3-pip python3-venv curl libtcmalloc-minimal4", timeout=900)
+sh("sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3-pip python3-venv curl libtcmalloc-minimal4 libomp5-18 libnuma-dev ffmpeg libsm6 libxext6 libgl1 lsof", timeout=900)
 result["python_path"] = shutil.which("python3")
 result["pip_path"] = shutil.which("pip3")
 result["curl_path"] = shutil.which("curl")
@@ -174,48 +230,48 @@ venv_python = os.path.join(venv_dir, "bin", "python")
 os.environ["PATH"] = os.path.join(venv_dir, "bin") + os.pathsep + os.path.expanduser("~/.local/bin") + os.pathsep + os.environ.get("PATH", "")
 
 def vllm_cpu_ready():
-    code, _ = sh(
-        f"{venv_python} - <<'VERIFY'\n"
-        "import importlib\n"
-        "import vllm\n"
-        "import vllm.platforms\n"
-        f"assert vllm.__version__.split('+', 1)[0] == {VLLM_VERSION!r}, vllm.__version__\n"
-        "assert vllm.platforms.current_platform.device_name == 'cpu', vllm.platforms.current_platform.device_name\n"
-        "importlib.import_module('vllm._C')\n"
-        "VERIFY\n"
-        "VLLM_TARGET_DEVICE=cpu vllm serve --help >/dev/null",
-        timeout=120,
-    )
-    return code == 0
+    code, out = sh(RUNTIME_CHECK, timeout=120)
+    if code != 0:
+        result["runtime_error"] = out[-4000:]
+        return False
+    try:
+        result["runtime_evidence"] = json.loads(out.splitlines()[-1])
+    except (ValueError, IndexError):
+        result["runtime_error"] = "Missing runtime verification evidence"
+        return False
+    result.pop("runtime_error", None)
+    return True
 
-if not shutil.which("vllm") or not vllm_cpu_ready():
-    sh("python3 -m pip install --user --break-system-packages -U uv", timeout=900)
-    sh(f"rm -rf {venv_dir}", timeout=300)
+if not vllm_cpu_ready():
+    os.environ.pop("LD_PRELOAD", None)
     sh(f"python3 -m venv {venv_dir}", timeout=300)
-    uv_path = os.path.expanduser("~/.local/bin/uv")
-    if os.path.exists(uv_path):
-        sh(
-            f"{uv_path} pip install --python {venv_python} --force-reinstall vllm=={VLLM_VERSION} "
-            f"--extra-index-url https://wheels.vllm.ai/{VLLM_VERSION}/cpu "
-            "--extra-index-url https://download.pytorch.org/whl/cpu "
-            "--index-strategy unsafe-best-match --torch-backend cpu",
-            timeout=2400,
-        )
-    if not vllm_cpu_ready():
-        sh(
-            f"{venv_python} -m pip install --no-cache-dir --force-reinstall vllm=={VLLM_VERSION} "
-            f"--extra-index-url https://wheels.vllm.ai/{VLLM_VERSION}/cpu "
-            "--extra-index-url https://download.pytorch.org/whl/cpu",
-            timeout=2400,
-        )
+    constraints_path = os.path.join(venv_dir, "runtime-constraints.txt")
+    with open(constraints_path, "w") as constraints_file:
+        constraints_file.write(CONSTRAINTS)
+    cpu_index_url = f"https://wheels.vllm.ai/{VLLM_VERSION}/cpu"
+    result["vllm_install_variant"] = "vllm-cpu-zendnn-pinned" if is_amd else "vllm-cpu-intel-pinned"
+    sh(
+        f"{venv_python} -m pip install --upgrade pip && "
+        f"{venv_python} -m pip install --no-cache-dir --force-reinstall 'vllm=={VLLM_VERSION}+cpu' "
+        f"'torch==2.13.0+cpu' {zentorch_requirement}'transformers==5.17.0' "
+        "'numpy==2.3.5' 'setuptools==77.0.3' 'compressed-tensors==0.17.0' "
+        f"-c {constraints_path} --extra-index-url {cpu_index_url} "
+        "--extra-index-url https://download.pytorch.org/whl/cpu && "
+        f"{venv_python} -m pip check",
+        timeout=2400,
+    )
 vllm_path = shutil.which("vllm")
 if vllm_path and vllm_cpu_ready():
     result["vllm_status"] = "installed"
-    result["vllm_version"] = output(f"{venv_python} -c 'import vllm; print(getattr(vllm, \"__version__\", \"unknown\"))'") or output("vllm --version")
+    result["vllm_version"] = result["runtime_evidence"]["vllm_version"]
 else:
     result["vllm_status"] = "missing"
 
-benchmark_python = venv_python if os.path.exists(venv_python) else "python3"
+benchmark_python = venv_python
+constraints_path = os.path.join(venv_dir, "runtime-constraints.txt")
+if os.path.isdir(venv_dir):
+    with open(constraints_path, "w") as constraints_file:
+        constraints_file.write(CONSTRAINTS)
 guide_code, guide_out = sh(f"{benchmark_python} -m pip show guidellm", timeout=120)
 guide_version = None
 if guide_code == 0:
@@ -224,7 +280,11 @@ if guide_code == 0:
             guide_version = line.split(":", 1)[1].strip()
             break
 if guide_code != 0 or guide_version != GUIDELLM_VERSION:
-    sh(f"{benchmark_python} -m pip install --no-cache-dir --force-reinstall guidellm=={GUIDELLM_VERSION}", timeout=1800)
+    sh(f"{benchmark_python} -m pip install --no-cache-dir guidellm=={GUIDELLM_VERSION} "
+       f"'torch==2.13.0+cpu' {zentorch_requirement}'transformers==5.17.0' 'numpy==2.3.5' "
+       "'setuptools==77.0.3' 'compressed-tensors==0.17.0' "
+       f"-c {constraints_path} --extra-index-url https://wheels.vllm.ai/{VLLM_VERSION}/cpu "
+       "--extra-index-url https://download.pytorch.org/whl/cpu", timeout=1800)
     guide_code, guide_out = sh(f"{benchmark_python} -m pip show guidellm", timeout=120)
 if guide_code == 0:
     result["benchmark_status"] = "installed"
@@ -235,10 +295,17 @@ if guide_code == 0:
 else:
     result["benchmark_status"] = "missing"
 result["root_usage_after"] = output("df -h / | tail -n 1")
-result["ok"] = result["benchmark_status"] == "installed" and result["vllm_status"] == "installed"
+pip_code, _ = sh(f"{venv_python} -m pip check", timeout=120)
+result["ok"] = result["benchmark_version"] == GUIDELLM_VERSION and result["vllm_status"] == "installed" and pip_code == 0 and vllm_cpu_ready()
+if not result["ok"]:
+    result.setdefault("runtime_evidence", {})["error"] = result.get("runtime_error", "Pinned runtime or GuideLLM dependency verification failed")
 result["log"] = log[-30:]
 print(json.dumps(result))
 PY"""
+
+VM_SETUP_SCRIPT = VM_SETUP_SCRIPT.replace(
+    "__RUNTIME_CHECK__", base64.b64encode(build_runtime_check_script().encode()).decode()
+)
 
 
 def parse_health(output: str) -> dict:

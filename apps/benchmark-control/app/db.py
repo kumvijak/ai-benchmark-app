@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS vm_setup_status (
   python_path TEXT,
   pip_path TEXT,
   curl_path TEXT,
+  runtime_evidence TEXT NOT NULL DEFAULT '{}',
   log TEXT NOT NULL DEFAULT '',
   last_setup_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(vm_profile_id)
@@ -106,6 +107,9 @@ CREATE TABLE IF NOT EXISTS vllm_profiles (
   chunked_prefill_enabled INTEGER NOT NULL,
   request_timeout_seconds INTEGER NOT NULL,
   port INTEGER NOT NULL,
+  quantization TEXT NOT NULL DEFAULT 'none',
+  model_revision TEXT,
+  cpu_kvcache_auto INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(owner_user_id, name)
 );
@@ -153,6 +157,10 @@ class Database:
         with self._lock:
             self.connect().executescript(SCHEMA)
             self._ensure_column("vm_setup_status", "benchmark_version", "TEXT")
+            self._ensure_column("vm_setup_status", "runtime_evidence", "TEXT NOT NULL DEFAULT '{}'")
+            self._ensure_column("vllm_profiles", "quantization", "TEXT NOT NULL DEFAULT 'none'")
+            self._ensure_column("vllm_profiles", "model_revision", "TEXT")
+            self._ensure_column("vllm_profiles", "cpu_kvcache_auto", "INTEGER NOT NULL DEFAULT 0")
 
     def _ensure_column(self, table: str, column: str, definition: str) -> None:
         con = self.connect()
