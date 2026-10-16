@@ -4,6 +4,7 @@ import json
 import os
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import types
 import unittest
@@ -176,6 +177,21 @@ class RuntimeTests(unittest.TestCase):
             row = db.one('SELECT runtime_evidence FROM vm_setup_status')
             self.assertEqual(json.loads(row['runtime_evidence']), {'zendnn_version': '6.0.1'})
             db.connect().close()
+
+    def test_missing_remote_runtime_identity_gives_recovery_steps(self):
+        with tempfile.TemporaryDirectory() as directory:
+            def run_remote(script, **kwargs):
+                source = script.split('\n', 1)[1].rsplit('\nPY', 1)[0]
+                source = source.replace('/tmp/aig-benchmark-control', directory)
+                result = subprocess.run([sys.executable, '-'], input=source, text=True,
+                                        capture_output=True, check=True)
+                self.assertNotIn('Traceback', result.stderr)
+                return result.stdout
+            ssh = types.SimpleNamespace(run_checked=run_remote)
+            with self.assertRaisesRegex(RuntimeError, 'runtime-8000.json.*Start Runtime') as error:
+                Worker(None, None)._runtime_evidence(ssh, 8000)
+            self.assertIn('checkbox alone', str(error.exception))
+            self.assertEqual(list(Path(directory).iterdir()), [])
 
     def test_benchmark_rejects_unverified_and_stale_servers(self):
         evidence = dict(vllm_version='0.31.0+cpu', torch_version='2.13.0+cpu',

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import ast
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import fcntl
@@ -62,7 +63,14 @@ def http_call(port, route, payload=None, timeout=120):
 
 
 def validate_identity(spec, root):
-    evidence=json.loads((root/f'runtime-{spec["port"]}.json').read_text())
+    try:
+        evidence=json.loads((root/f'runtime-{spec["port"]}.json').read_text())
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            f'Runtime identity file for port {spec["port"]} is missing; '
+            'start the tracing-enabled runtime from the app and wait until ready before capturing. '
+            'Do not create the identity file manually.'
+        ) from exc
     if any(evidence.get(k) != spec[k] for k in ('server_pid','server_start_ticks')):
         raise RuntimeError('Runtime identity changed; restart the diagnostic capture')
     stat=Path(f'/proc/{spec["server_pid"]}/stat').read_text()
@@ -181,7 +189,13 @@ def capture(spec, root=ROOT, call=http_call):
 
 def remote_trace_command(spec):
     source=Path(__file__).read_text()
-    source=source.split("if __name__ == '__main__':",1)[0]
+    # Ship the capture definitions, excluding this local command generator.
+    # A text search for a main guard can match its own string literal here and
+    # truncate the remote payload in the middle of a Python string.
+    generator=next(node for node in ast.parse(source).body
+                   if isinstance(node,ast.FunctionDef) and node.name=='remote_trace_command')
+    source=''.join(source.splitlines(keepends=True)[:generator.lineno-1])
+    compile(source,'<remote trace payload>','exec')
     encoded=base64.b64encode(source.encode()).decode()
     return ("python3 - <<'TRACE'\nimport base64,json\n"
             f"code=base64.b64decode({encoded!r}).decode()\n"

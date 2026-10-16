@@ -296,7 +296,11 @@ class Worker:
             "import json, pathlib\n"
             f"port = {int(port)}\n"
             "root = pathlib.Path('/tmp/aig-benchmark-control')\n"
-            "evidence = json.loads((root / f'runtime-{port}.json').read_text())\n"
+            "identity_path = root / f'runtime-{port}.json'\n"
+            "if not identity_path.exists():\n"
+            "    print(json.dumps({'error': 'runtime_identity_missing'}))\n"
+            "    raise SystemExit(0)\n"
+            "evidence = json.loads(identity_path.read_text())\n"
             "log = (root / f'vllm-{port}.log').read_text(errors='replace')\n"
             "activation = []\n"
             "for line in log.splitlines():\n"
@@ -310,6 +314,14 @@ class Worker:
             "print(json.dumps(evidence))\nPY"
         )
         evidence = json.loads(ssh.run_checked(script, timeout=30).strip().splitlines()[-1])
+        if evidence.get('error') == 'runtime_identity_missing':
+            raise RuntimeError(
+                f'No runtime identity file (runtime-{int(port)}.json) exists on the selected VM. '
+                f'Check the selected VM and port {int(port)}, then use Start Runtime in this app and wait until ready. '
+                'For tracing, start a saved profile with kernel tracing enabled; enabling the checkbox alone '
+                'does not start or reconfigure a server. If a server already occupies the port, '
+                'stop it before starting the diagnostic profile. Do not create the identity file manually.'
+            )
         expected = {'vllm_version': VLLM_VERSION, 'torch_version': TORCH_VERSION}
         if evidence.get('backend') == 'zendnn':
             expected.update(zentorch_version=ZENTORCH_VERSION, zendnn_version=ZENDNN_VERSION,

@@ -63,6 +63,15 @@ class TraceTests(unittest.TestCase):
         subprocess.run(['bash','-n'],input=build_start_script(enabled),text=True,check=True)
         compile(remote_trace_command(self.spec).split("<<'TRACE'\n",1)[1].rsplit('\nTRACE',1)[0],'<remote capture>','exec')
 
+    def test_generated_remote_payload_executes_before_validating_capture(self):
+        # Execute both encoding layers in a real interpreter. Invalid bounds
+        # stop before touching runtime files or contacting an inference server.
+        command=remote_trace_command(self.spec | {'requests':0})
+        result=subprocess.run(['bash'],input=command,text=True,capture_output=True)
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn('ValueError: Diagnostic capture requires',result.stderr)
+        self.assertNotIn('SyntaxError',result.stderr)
+
     def test_capture_profiles_requests_only_and_packages_gzip_worker_trace(self):
         (self.directory/'old.json').write_text('{}')
         result=self.run_capture()
@@ -138,6 +147,12 @@ class TraceTests(unittest.TestCase):
         worker=Worker(None,None);worker._vm=lambda *a:None;worker._vllm=lambda *a:profile(kernel_tracing_enabled=True)
         with self.assertRaisesRegex(RuntimeError,'diagnostic only'):
             worker._run_benchmark(1,{'vm_profile_id':1,'vllm_profile_id':1})
+
+    def test_missing_identity_does_not_start_profiler_or_reconstruct_evidence(self):
+        with self.assertRaisesRegex(RuntimeError, 'identity file.*missing.*start the tracing-enabled runtime'):
+            capture(self.spec, self.root, self.call)
+        self.assertEqual(self.calls, [])
+        self.assertFalse((self.root/'runtime-8000.json').exists())
 
     def test_changed_identity_and_concurrent_capture_do_not_collect_other_evidence(self):
         with patch('app.tracing.validate_identity',side_effect=RuntimeError('changed')):

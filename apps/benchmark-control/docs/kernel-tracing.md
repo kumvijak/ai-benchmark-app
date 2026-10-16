@@ -13,6 +13,12 @@ Kernel tracing is an opt-in diagnostic mode for vLLM CPU runtimes. It captures a
 
 Tracing profiles are omitted from the Benchmarking profile dropdown. The API and worker also reject performance benchmarks against a selected tracing profile; serving-configuration matching prevents using a normal profile against a running tracing server.
 
+## Missing runtime identity file
+
+`/tmp/aig-benchmark-control/runtime-<port>.json` is written on the inference VM by the app's runtime launcher. VM provisioning and saving a profile with tracing enabled do not create a running vLLM server. Use **Start Runtime** with the saved tracing-enabled profile and wait until ready before **Capture Kernel Trace**.
+
+If the file is still missing, confirm the selected VM and port. An older or externally started server, or removal of its temporary files, also requires restarting through the app before capture. Stop an existing server on that port before restarting. Never create a placeholder identity file: tracing checks the actual PID, process start time, serving configuration, and verified backend before profiling.
+
 ## What gets enabled
 
 The launch command uses vLLM 0.31.0's `--profiler-config` with the PyTorch profiler, CPU activities, input shapes, stack recording and a per-port directory under `/tmp/aig-benchmark-control/traces-<port>`.

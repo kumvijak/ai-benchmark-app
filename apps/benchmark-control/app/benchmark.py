@@ -29,12 +29,14 @@ class GuideLLMBenchmarkSpec:
 
 
 GUIDELLM_REMOTE_SCRIPT = r"""
-import base64, importlib.metadata, json, os, subprocess, sys, time
+import base64, importlib.metadata, json, os, subprocess, sys, tempfile, time, types
 
 spec = json.loads(sys.stdin.read())
 job_id = spec["job_id"]
-job_dir = f"/tmp/aig-benchmark-control/guidellm-{job_id}"
-os.makedirs(job_dir, exist_ok=True)
+root = '/tmp/aig-benchmark-control'
+os.makedirs(root, exist_ok=True)
+# App replacements can reuse SQLite job IDs on the same inference VM.
+job_dir = tempfile.mkdtemp(prefix=f"guidellm-{job_id}-", dir=root)
 
 backend = {
     "kind": "openai_http",
@@ -102,8 +104,25 @@ env["GUIDELLM__DEFAULT_RESULTS_DIR"] = job_dir
 env["GUIDELLM__LOGGING__LOG_FILE"] = log_path
 env["GUIDELLM__LOGGING__LOG_FILE_LEVEL"] = "INFO"
 
+# Both metadata and the CLI must come from the same managed interpreter.
+# Validate before running so a missing package cannot mask a completed run.
+args[0] = os.path.join(os.path.dirname(sys.executable), 'guidellm')
+guidellm_version = None
+setup_error = None
+try:
+    guidellm_version = importlib.metadata.version('guidellm')
+except importlib.metadata.PackageNotFoundError:
+    setup_error = ('GuideLLM is not installed in the managed benchmark environment '
+                   f'({sys.executable}). Run VM Setup before benchmarking.')
 started = time.time()
-proc = subprocess.run(args, text=True, capture_output=True, env=env)
+if setup_error:
+    proc = types.SimpleNamespace(returncode=127, stdout='', stderr=setup_error)
+else:
+    try:
+        proc = subprocess.run(args, text=True, capture_output=True, env=env)
+    except OSError as exc:
+        proc = types.SimpleNamespace(returncode=127, stdout='',
+            stderr=f'Could not launch managed GuideLLM CLI: {exc}. Run VM Setup before benchmarking.')
 duration = time.time() - started
 
 artifacts = {}
@@ -124,7 +143,8 @@ for name, path, binary in [
 
 payload = {
     "returncode": proc.returncode,
-    "guidellm_version": importlib.metadata.version("guidellm"),
+    "guidellm_version": guidellm_version,
+    "benchmark_python": sys.executable,
     "duration_seconds": duration,
     "command": args,
     "job_dir": job_dir,
@@ -145,7 +165,11 @@ def remote_guidellm_command(spec: GuideLLMBenchmarkSpec, job_id: int) -> str:
     payload = guide_spec_payload(spec, job_id)
     encoded_script = base64.b64encode(GUIDELLM_REMOTE_SCRIPT.encode("utf-8")).decode("ascii")
     return (
-        "python3 - <<'PY'\n"
+        "if [ ! -x \"$HOME/.aig-vllm/bin/python\" ]; then\n"
+        "  echo 'Managed benchmark Python is missing. Run VM Setup before benchmarking.' >&2\n"
+        "  exit 127\n"
+        "fi\n"
+        "\"$HOME/.aig-vllm/bin/python\" - <<'PY'\n"
         "import base64, subprocess, sys\n"
         f"script = base64.b64decode({encoded_script!r}).decode('utf-8')\n"
         f"payload = {json.dumps(payload, separators=(',', ':'))!r}\n"
