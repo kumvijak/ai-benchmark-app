@@ -127,3 +127,7 @@ The **Reports** tab queues MLCommons-style offline report collections with four 
 Docker Compose starts a dedicated `report-worker` service using the shared data volume. Single-process local development defaults to an independent embedded reporting thread. Reports use immutable evidence snapshots and do not require live benchmark VMs. Restart existing inference runtimes after upgrading before running new benchmarks: serving-model/precision matching is now required.
 
 See [Reports module](docs/reporting.md) for usage, queue recovery, artifact storage, API endpoints and measurement limitations. Native timing is not independently validated by this first version; reconstructed throughput is withheld.
+
+## Kernel tracing (0.3.1)
+
+Save a separate runtime profile with **Enable kernel tracing (diagnostic only)** checked, restart the runtime with that profile, then use **Capture Kernel Trace**. Select its `trace_runtime` job in **Queue** to download the worker traces, execution log and operator summary. Tracing defaults to off and trace-enabled profiles cannot run performance benchmarks. See [Kernel tracing](docs/kernel-tracing.md) for the capture sequence, evidence interpretation and limits.

@@ -60,6 +60,20 @@ Output lives at `APP_ARTIFACT_DIR/reports/<owner>/<report>/<attempt>/`. Identica
 
 ## Validation
 
+The remote benchmark wrapper and GuideLLM CLI run from the same managed environment,
+`~/.aig-vllm`. GuideLLM metadata is checked before any benchmark requests; missing
+installation returns an actionable VM Setup error. The result records the actual
+`benchmark_python`, GuideLLM version, CLI exit status, stdout/stderr, and native
+artifacts even when the CLI fails. Each remote attempt uses a unique directory
+under `/tmp/aig-benchmark-control/guidellm-<job-id>-<unique-suffix>/` so replacing
+the control app and reusing a job ID cannot overwrite an earlier attempt.
+
+An older wrapper used system Python for version lookup after running the managed
+CLI. `PackageNotFoundError: guidellm` in that wrapper is a reporting/environment
+failure and does not establish the native benchmark's outcome. Existing native
+files may remain in the older `/tmp/aig-benchmark-control/guidellm-<job-id>/`
+directory on the inference VM; inspect its JSON/log before interpreting the run.
+
 From `apps/benchmark-control` in an environment with the application dependencies and `httpx`:
 
 ```sh

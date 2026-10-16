@@ -26,10 +26,10 @@ settings = get_settings()
 db = Database(settings.db_path)
 db.init()
 secret_box = SecretBox(settings.app_secret)
-worker = Worker(db, secret_box)
+worker = Worker(db, secret_box, settings.artifact_dir)
 report_worker = ReportWorker(db, settings.artifact_dir)
 
-app = FastAPI(title="AI Inference Benchmark Control", version="0.3.0")
+app = FastAPI(title="AI Inference Benchmark Control", version="0.3.1")
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
 
@@ -87,6 +87,7 @@ class VllmProfileRequest(BaseModel):
     max_num_seqs: int = Field(default=8, ge=1)
     cpu_kvcache_space_gib: int | None = Field(default=8, ge=1)
     reserved_cpu: int = Field(default=2, ge=0)
+    kernel_tracing_enabled: bool = False
     prefix_cache_enabled: bool = False
     chunked_prefill_enabled: bool = False
     request_timeout_seconds: int = Field(default=30, ge=1)
@@ -481,14 +482,14 @@ def create_vllm_profile(req: VllmProfileRequest, user: dict[str, Any] = Depends(
           owner_user_id, name, model_ref, dtype, max_model_len, max_num_batched_tokens,
           max_num_seqs, cpu_kvcache_space_gib, reserved_cpu, prefix_cache_enabled,
           chunked_prefill_enabled, request_timeout_seconds, port, quantization,
-          model_revision, cpu_kvcache_auto
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          model_revision, cpu_kvcache_auto, kernel_tracing_enabled
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             user["id"], req.name, req.model_ref, req.dtype, req.max_model_len, req.max_num_batched_tokens,
             req.max_num_seqs, req.cpu_kvcache_space_gib or 0, req.reserved_cpu,
             int(req.prefix_cache_enabled), int(req.chunked_prefill_enabled), req.request_timeout_seconds, req.port,
-            req.quantization, req.model_revision, int(req.cpu_kvcache_space_gib is None),
+            req.quantization, req.model_revision, int(req.cpu_kvcache_space_gib is None), int(req.kernel_tracing_enabled),
         ),
     )
     db.audit(user["id"], "created", "vllm_profile", int(cur.lastrowid), {"name": req.name, "model_ref": req.model_ref})
@@ -502,7 +503,7 @@ def list_vllm_profiles(user: dict[str, Any] = Depends(current_user)) -> list[dic
         SELECT id, name, model_ref, dtype, max_model_len, max_num_batched_tokens, max_num_seqs,
                CASE WHEN cpu_kvcache_auto=1 THEN NULL ELSE cpu_kvcache_space_gib END AS cpu_kvcache_space_gib,
                reserved_cpu, prefix_cache_enabled, chunked_prefill_enabled,
-               request_timeout_seconds, port, quantization, model_revision
+               request_timeout_seconds, port, quantization, model_revision, kernel_tracing_enabled
         FROM vllm_profiles WHERE owner_user_id=? ORDER BY id
         """,
         (user["id"],),
@@ -523,6 +524,42 @@ def start_runtime(req: StartRuntimeRequest, user: dict[str, Any] = Depends(curre
     _assert_owned("vllm_profiles", req.vllm_profile_id, user["id"])
     job_id = db.create_job(user["id"], "start_runtime", req.model_dump())
     return {"job_id": job_id}
+
+
+class CaptureTraceRequest(BaseModel):
+    vm_profile_id: int
+    vllm_profile_id: int
+    concurrency: int = Field(default=1, ge=1, le=16)
+    requests: int = Field(default=2, ge=1, le=16)
+    max_tokens: int = Field(default=64, ge=1, le=128)
+
+    @model_validator(mode='after')
+    def enough_requests(self):
+        if self.requests < self.concurrency:
+            raise ValueError('Diagnostic requests must be at least the concurrency')
+        return self
+
+
+@app.post("/api/runtime/traces")
+def capture_kernel_trace(req: CaptureTraceRequest, user: dict[str, Any] = Depends(current_user)):
+    _assert_owned('vm_profiles', req.vm_profile_id, user['id'])
+    _assert_owned('vllm_profiles', req.vllm_profile_id, user['id'])
+    profile=db.one('SELECT kernel_tracing_enabled FROM vllm_profiles WHERE id=?', (req.vllm_profile_id,))
+    if not profile['kernel_tracing_enabled']:
+        raise HTTPException(status_code=409, detail='Enable kernel tracing in a new runtime profile and restart that runtime first')
+    return {'job_id':db.create_job(user['id'],'trace_runtime',req.model_dump())}
+
+
+@app.get("/api/jobs/{job_id}/trace.zip")
+def download_kernel_trace(job_id: int, user: dict[str, Any] = Depends(current_user)):
+    job=db.one("SELECT result FROM jobs WHERE id=? AND owner_user_id=? AND job_type='trace_runtime'", (job_id,user['id']))
+    if not job:
+        raise HTTPException(status_code=404,detail='Trace job not found')
+    result=json.loads(job['result'] or '{}')
+    path=settings.artifact_dir/'traces'/str(user['id'])/f'{job_id}.zip'
+    if not result.get('trace_artifact') or not path.is_file():
+        raise HTTPException(status_code=409,detail='No retained trace bundle is available')
+    return FileResponse(path,filename=f'kernel-trace-{job_id}.zip',media_type='application/zip',headers={'Cache-Control':'private, no-store'})
 
 
 @app.get("/api/runtime/processes")
@@ -574,6 +611,9 @@ def stop_runtime(req: StopRuntimeRequest, user: dict[str, Any] = Depends(current
 def run_benchmark(req: BenchmarkRequest, user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
     _assert_owned("vm_profiles", req.vm_profile_id, user["id"])
     _assert_owned("vllm_profiles", req.vllm_profile_id, user["id"])
+    profile=db.one('SELECT kernel_tracing_enabled FROM vllm_profiles WHERE id=?',(req.vllm_profile_id,))
+    if profile['kernel_tracing_enabled']:
+        raise HTTPException(status_code=409,detail='Trace-enabled runtimes are diagnostic only; use Capture Kernel Trace or restart a normal profile')
     if req.benchmark_mode not in {"concurrent", "sweep"}:
         raise HTTPException(status_code=400, detail="benchmark_mode must be concurrent or sweep")
     if req.sweep_strategy_type not in {"constant", "poisson"}:

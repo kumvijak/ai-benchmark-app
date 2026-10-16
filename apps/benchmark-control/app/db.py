@@ -107,6 +107,7 @@ CREATE TABLE IF NOT EXISTS vllm_profiles (
   chunked_prefill_enabled INTEGER NOT NULL,
   request_timeout_seconds INTEGER NOT NULL,
   port INTEGER NOT NULL,
+  kernel_tracing_enabled INTEGER NOT NULL DEFAULT 0,
   quantization TEXT NOT NULL DEFAULT 'none',
   model_revision TEXT,
   cpu_kvcache_auto INTEGER NOT NULL DEFAULT 0,
@@ -160,6 +161,7 @@ class Database:
             self.connect().executescript(REPORT_SCHEMA)
             self._ensure_column("vm_setup_status", "benchmark_version", "TEXT")
             self._ensure_column("vm_setup_status", "runtime_evidence", "TEXT NOT NULL DEFAULT '{}'")
+            self._ensure_column("vllm_profiles", "kernel_tracing_enabled", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column("vllm_profiles", "quantization", "TEXT NOT NULL DEFAULT 'none'")
             self._ensure_column("vllm_profiles", "model_revision", "TEXT")
             self._ensure_column("vllm_profiles", "cpu_kvcache_auto", "INTEGER NOT NULL DEFAULT 0")

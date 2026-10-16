@@ -275,6 +275,7 @@ function fillVllmForm(item) {
   $("maxSeqs").value = item.max_num_seqs;
   $("kvCache").value = item.cpu_kvcache_space_gib ?? "";
   $("reservedCpu").value = item.reserved_cpu;
+  $("kernelTracing").checked = !!item.kernel_tracing_enabled;
   $("prefixCache").checked = !!item.prefix_cache_enabled;
   $("chunkedPrefill").checked = !!item.chunked_prefill_enabled;
   $("requestTimeout").value = item.request_timeout_seconds;
@@ -291,12 +292,13 @@ async function refreshVllm() {
     { key: "model_ref", label: "Model" },
     { key: "quantization", label: "Model precision", render: (x) => modelPrecisionLabel(x.quantization) },
     { key: "dtype", label: "Dtype" },
+    { key: "kernel_tracing_enabled", label: "Mode", render: (x) => x.kernel_tracing_enabled ? "Diagnostic tracing" : "Benchmark" },
     { key: "port", label: "Port" },
     { key: "max_model_len", label: "Max Len" },
     { key: "max_num_seqs", label: "Seqs" },
     { key: "cpu_kvcache_space_gib", label: "KV GiB", render: (x) => x.cpu_kvcache_space_gib == null ? "Auto" : x.cpu_kvcache_space_gib }
   ], data, (item) => { selectedVllm = item.id; fillVllmForm(item); }, (item) => item.id === selectedVllm);
-  fillProfileSelect("benchmarkVllmSelect", data, currentSelectNumber("benchmarkVllmSelect") || selectedVllm, (x) => `${x.name} | ${x.model_ref} | ${modelPrecisionLabel(x.quantization)} | port ${x.port}`, "No vLLM profiles");
+  fillProfileSelect("benchmarkVllmSelect", data.filter(x => !x.kernel_tracing_enabled), currentSelectNumber("benchmarkVllmSelect") || selectedVllm, (x) => `${x.name} | ${x.model_ref} | ${modelPrecisionLabel(x.quantization)} | port ${x.port}`, "No vLLM profiles");
 }
 
 async function refreshJobs() {
@@ -380,6 +382,7 @@ function renderQueue(data) {
 }
 
 function renderQueueDetail(job) {
+  $("downloadTraceBtn").disabled = !(job.job_type === "trace_runtime" && job.result?.trace_artifact);
   const lines = [
     `Job ID: ${job.id}`,
     `Type: ${job.job_type}`,
@@ -1094,6 +1097,7 @@ $("saveVllmBtn").onclick = async () => {
       max_num_seqs: Number($("maxSeqs").value),
       cpu_kvcache_space_gib: kvCache ? Number(kvCache) : null,
       reserved_cpu: Number($("reservedCpu").value),
+      kernel_tracing_enabled: $("kernelTracing").checked,
       prefix_cache_enabled: $("prefixCache").checked,
       chunked_prefill_enabled: $("chunkedPrefill").checked,
       request_timeout_seconds: Number($("requestTimeout").value),
@@ -1136,6 +1140,30 @@ $("startRuntimeBtn").onclick = async () => {
   toast(`Runtime start queued as job ${data.job_id}`);
   await refreshJobs();
   await refreshRuntimeProcesses(false);
+};
+
+$("captureTraceBtn").onclick = async () => {
+  const vmId = currentSelectNumber("runtimeVmSelect") || selectedVm;
+  if (!vmId || !selectedVllm) return toast("Select VM and saved vLLM profiles first");
+  const concurrency = Number($("traceConcurrency").value);
+  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 16) return toast("Trace concurrency must be 1–16");
+  try {
+    const data = await api("/api/runtime/traces", {method:"POST",body:JSON.stringify({vm_profile_id:vmId,vllm_profile_id:selectedVllm,concurrency,requests:Math.max(2,concurrency),max_tokens:64})});
+    selectedQueueJobId = data.job_id;
+    toast(`Diagnostic capture queued as job ${data.job_id}`);
+    activateTab("queue"); await refreshJobs();
+  } catch(error) { toast(error.message); }
+};
+
+$("downloadTraceBtn").onclick = async () => {
+  if (!selectedQueueJobId) return;
+  try {
+    const response = await fetch(`/api/jobs/${selectedQueueJobId}/trace.zip`, {headers:{Authorization:`Bearer ${token}`}});
+    if (!response.ok) throw new Error(await response.text());
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement("a"); link.href = url; link.download = `kernel-trace-${selectedQueueJobId}.zip`; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch(error) { toast(error.message); }
 };
 
 $("stopRuntimeBtn").onclick = async () => {

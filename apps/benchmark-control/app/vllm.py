@@ -23,6 +23,7 @@ class VllmProfile:
     port: int
     quantization: str = 'none'
     model_revision: str | None = None
+    kernel_tracing_enabled: bool = False
 
 
 def build_vllm_command(profile: VllmProfile, checkpoint_path: str | None = None, launch_script: str | None = None) -> str:
@@ -45,6 +46,10 @@ def build_vllm_command(profile: VllmProfile, checkpoint_path: str | None = None,
         "--port",
         str(profile.port),
     ]
+    if profile.kernel_tracing_enabled:
+        from .tracing import trace_dir
+        args.extend(['--profiler-config', json.dumps(dict(profiler='torch', torch_profiler_dir=trace_dir(profile.port),
+            torch_profiler_activities=['CPU'], torch_profiler_record_shapes=True, torch_profiler_with_stack=True))])
     if launch_script:
         args[:1] = ['python', launch_script]
     if profile.quantization != 'none':
@@ -65,6 +70,8 @@ def build_vllm_command(profile: VllmProfile, checkpoint_path: str | None = None,
         "TORCHINDUCTOR_AUTOGRAD_CACHE": "0",
         "VLLM_CPU_NUM_OF_RESERVED_CPU": str(profile.reserved_cpu),
     }
+    if profile.kernel_tracing_enabled:
+        env.update(ZENDNNL_ENABLE_PROFILER='1', ZENDNNL_API_LOG_LEVEL='4', VLLM_LOGGING_LEVEL='DEBUG')
     if profile.cpu_kvcache_space_gib is not None:
         env['VLLM_CPU_KVCACHE_SPACE'] = str(profile.cpu_kvcache_space_gib)
     if profile.quantization == 'int4':
@@ -83,6 +90,8 @@ def build_start_script(profile: VllmProfile, checkpoint_path: str | None = None,
         "set -e\n"
         "export PATH=$HOME/.aig-vllm/bin:$HOME/.local/bin:$PATH\n" +
         "unset VLLM_CPU_SGL_KERNEL\n" +
+        "unset ZENDNNL_ENABLE_PROFILER ZENDNNL_API_LOG_LEVEL VLLM_TORCH_PROFILER_DIR\n" +
+        "unset VLLM_LOGGING_LEVEL\n" +
         ("unset VLLM_CPU_KVCACHE_SPACE\n" if profile.cpu_kvcache_space_gib is None else "") +
         "command -v vllm >/dev/null || { echo 'vllm is not installed or not on PATH' >&2; exit 127; }\n"
         f"if ss -ltn 2>/dev/null | awk '{{print $4}}' | grep -Eq '(^|:){profile.port}$'; then "
