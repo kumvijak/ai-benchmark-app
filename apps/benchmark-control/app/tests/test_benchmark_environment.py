@@ -1,5 +1,6 @@
 """Execute the generated runner in an isolated venv with an explicit CLI fixture."""
 import base64
+from dataclasses import replace
 import json
 import os
 from pathlib import Path
@@ -92,3 +93,21 @@ raise SystemExit(int(os.environ.get('AIG_FIXTURE_EXIT', '0')))
         result = self.run_runner(python=self.root / 'missing/python')
         self.assertEqual(result.returncode, 127)
         self.assertIn('Run VM Setup', result.stderr)
+
+    def test_full_run_profile_disables_future_cooldown_boundary_in_both_modes(self):
+        self.install_fixture_metadata()
+        for mode, legacy_cooldown in [('concurrent', 0), ('concurrent', 5), ('sweep', 5)]:
+            with self.subTest(mode=mode, legacy_cooldown=legacy_cooldown):
+                self.spec = replace(self.spec, mode=mode, cooldown_seconds=legacy_cooldown)
+                result = self.run_runner()
+                self.assertEqual(result.returncode, 0, result.stderr)
+                envelope = json.loads(result.stdout)
+                args = envelope['command']
+                profile = json.loads(args[args.index('--profile')+1])
+                self.assertIsNone(profile['cooldown'])
+                self.assertIsNone(profile['warmup'])
+                self.assertEqual(envelope['profile'], profile)
+                self.assertIn('kind=max_requests,count=2', args)
+                self.assertIn('kind=max_duration,seconds=600', args)
+                self.assertEqual(envelope['timing_policy']['name'], 'full-request-window-v1')
+                self.assertEqual(envelope['timing_policy']['legacy_requested_cooldown_seconds'], legacy_cooldown)

@@ -416,7 +416,7 @@ SYSTEM"""
                 request_timeout_seconds=vllm.request_timeout_seconds,
                 mode=mode,
                 max_duration_seconds=int(payload.get("max_duration_seconds") or 600),
-                cooldown_seconds=int(payload.get("cooldown_seconds", 5)),
+                cooldown_seconds=int(payload.get("cooldown_seconds", 0)),
                 seed=int(payload.get("seed", 42)),
                 sweep_size=int(payload.get("sweep_size") or 10),
                 sweep_strategy_type=str(payload.get("sweep_strategy_type") or "poisson"),

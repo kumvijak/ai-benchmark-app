@@ -21,7 +21,7 @@ class GuideLLMBenchmarkSpec:
     max_errors: int | None = 5
     mode: str = "concurrent"
     max_duration_seconds: int = 600
-    cooldown_seconds: int = 5
+    cooldown_seconds: int = 0  # Legacy input; measurement phases are disabled below.
     seed: int = 42
     sweep_size: int = 10
     sweep_strategy_type: str = "poisson"
@@ -60,14 +60,24 @@ if spec["mode"] == "sweep":
         "rampup_duration": 10,
         "strategy_type": spec["sweep_strategy_type"],
         "max_concurrency": max(spec["concurrencies"]),
-        "cooldown": {"mode": "duration", "value": spec["cooldown_seconds"]},
     }
 else:
     profile = {
         "kind": "concurrent",
         "streams": spec["concurrencies"],
-        "cooldown": {"mode": "duration", "value": spec["cooldown_seconds"]},
     }
+
+# Full-run measurements must stop at actual request completion, not the safety
+# duration cap. In GuideLLM 0.8.0 even a duration cooldown of zero installs a
+# future boundary. Null disables the phase; it is NOT equivalent to value=0.
+profile.update(warmup=None, cooldown=None)
+timing_policy = {
+    "name": "full-request-window-v1",
+    "measurement_warmup": None,
+    "measurement_cooldown": None,
+    "legacy_requested_cooldown_seconds": spec.get("cooldown_seconds", 0),
+    "duration_limit_role": "safety-cap",
+}
 
 json_path = f"{job_dir}/benchmarks.json"
 csv_path = f"{job_dir}/benchmarks.csv"
@@ -155,6 +165,7 @@ payload = {
     "backend": backend,
     "data": data,
     "profile": profile,
+    "timing_policy": timing_policy,
 }
 print(json.dumps(payload))
 raise SystemExit(proc.returncode)

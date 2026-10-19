@@ -13,16 +13,106 @@ The existing per-job GuideLLM exports remain under **Native Report**.
 
 Each detail page groups an identical model/revision, precision, host, runtime, software and workload configuration. Different request/duration/error constraints remain separate. Concurrency points and retries remain individual columns; attempts are never averaged together.
 
+## Catalogue and detail presentation (pipeline 1.1.0)
+
+Pipeline 1.2.1 uses **Concurrency 1**, **Concurrency 2**, etc. as run-data column
+headings. A single-attempt table shows the job identifier once above the table;
+column headings contain no job or point notation. For retries, headings add only
+**Attempt 1**, **Attempt 2**, etc., with the job mapping above the table. Missing
+concurrency is labelled **Concurrency not recorded**. Queue a new report after
+upgrading to obtain these headings; existing bundles remain immutable.
+
+The catalogue follows the supplied CPU benchmark HTML reference: a shared header,
+summary counts, a responsive two-column card grid, and filters for model, host,
+precision, test profile, completion and run date. Text search also matches saved
+software/configuration fields. Filters combine; Reset filters restores all cards,
+and a live count and empty state explain the current selection.
+
+Each card represents one attempt, including failures without measurements. Cards
+link to an anchored attempt summary on the matching configuration's detail page.
+Retries share configuration details but keep separate cards, chart points and
+run-data columns. Attempt completion uses all retained points: any failed point
+means failed; otherwise any incomplete point means incomplete. The summary counts
+refer to workload attempts, not individual concurrency points. Request counts sum
+retained load points only when every contributing count is known; missing data
+is never displayed as zero.
+
+Precision labels retain the recorded distinction between BF16, FP16 and weight
+quantization. Quantized runs also display their floating-point dtype in the detail
+page. Missing quantization evidence remains unverified. Status badges say
+**COMPLETE**, **FAILED**, or **INCOMPLETE**; completion is separate from evidence
+validity and does not imply MLPerf qualification. Evidence findings identify missing
+records or detected inconsistencies.
+
+Detail pages include report facts, four performance charts with grid labels and
+keyboard-accessible point readouts, attempt toggles and summaries, model/workload/
+hardware/software configuration, a horizontally scrollable run-data table,
+evidence findings, download links and measurement definitions. The reference's
+historical measurements, campaign-specific claims and reconstructed throughput
+are not imported into newly generated reports.
+
+Pipeline 1.1.0 changes presentation without changing the metric methodology or
+bundle data schema. Queue a report after upgrading to obtain the new layout;
+existing generated bundles stay immutable. The version participates in report
+identity, so selecting the same sources and title produces a fresh report after
+this upgrade. Offline ZIPs remain self-contained with no external fonts or scripts.
+
+## Full-run timing correction (pipeline 1.2.0)
+
+The runner explicitly sets GuideLLM profile `warmup` and `cooldown` to `null`
+for both concurrent and sweep modes. Request, duration, error and over-saturation
+constraints remain in force. The duration is a safety cap, not the denominator
+for a request-limited run that finishes earlier. This avoids GuideLLM 0.8.0's
+future measurement boundary when a duration cooldown is combined with an early
+request-count stop. A duration cooldown of **zero** is also unsafe: it still
+installs a boundary at the duration cap. Null disables the phase entirely.
+
+The UI's old cooldown control was removed: it incorrectly described a pause
+between strategies, while GuideLLM actually used it as a measurement exclusion.
+The legacy API field remains accepted for compatibility but is not applied.
+Its default is now zero. Results record `timing_policy` with the effective null
+phases, legacy requested value and safety-cap role; snapshots retain that policy.
+No GuideLLM installation or previously generated native artifacts are patched.
+
+The report's primary throughput is **full-run successful output tokens/s**:
+actual successful output tokens divided by latest request end minus earliest
+request start **across all outcomes**. This includes fill, drain and scheduling
+gaps. It is not steady-state capacity, per-request speed, latency-qualified
+goodput or an official MLPerf metric. Warmup/cooldown-filtered native metrics
+have a different scope and are preserved rather than silently replaced.
+
+Reconstruction requires all retained status counts and their total to reconcile,
+unique request IDs, finite ordered timestamps within scheduler execution, matching
+scheduler request bounds, and actual successful output token counts that match
+native count/sum summaries. Sampled or missing records withhold the rate. No
+configured output-token target is substituted for generated tokens. Native
+measurement boundaries are checked independently against scheduler execution,
+positive duration and reported duration; negative cooldown is a specific finding.
+Native timing inconsistencies do not prevent recovering a separately reconciled
+full-run rate. Native latency distributions remain labelled as native.
+
+`report.json` retains native fields, adds per-point timing checks/findings, full-run
+boundaries/duration/token total/TPS, and exposes the rate through the existing
+`reconstructed_system_tps` field. CSV adds timing statuses, full-run duration,
+token total and TPS/concurrency; old native fields keep their original semantics.
+Throughput charts use only reconciled full-run rates; native values remain in the
+run table for audit. The former blanket warning is replaced by specific findings.
+
+Queue a new report after upgrading to recover eligible historical attempts with
+the new method. Existing bundles remain immutable. No new inference run is
+needed if historical records are complete. Incomplete records require a rerun to
+obtain a full-run rate. Future native exports use the corrected runner policy.
+
 ## Data and measurement boundary
 
 Inputs are snapshotted when the report is queued. Source job deletion or later profile changes do not change an existing report. The worker uses retained data only: it never connects to OCI, SSH or an inference endpoint.
 
 New benchmark runs record the serving profile, observed hardware, runtime backend/versions and actual GuideLLM version. The running server must confirm a matching serving configuration before a new benchmark starts. **Restart existing runtimes after upgrading** to obtain this evidence. Historical results can still be reported, with explicit identity/revision warnings; current saved profiles are not used as historical facts.
 
-- Four charts show native system output TPS vs aggregate TPS/concurrency, native system TPS vs concurrency, P95 TTFT vs concurrency, and aggregate TPS/concurrency vs concurrency.
+- Four charts show full-run successful output TPS vs full-run TPS/concurrency, full-run output TPS vs concurrency, native P95 TTFT vs concurrency, and full-run TPS/concurrency vs concurrency.
 - Aggregate TPS/concurrency is a disclosed diagnostic ratio, not MLPerf Endpoints' percentile-based per-user metric.
 - TTFT/TPOT retain native milliseconds. Native query latency in seconds is converted to milliseconds.
-- Native throughput is labelled unvalidated. Version 1 of the report pipeline does not independently validate retained request timing or reconstruct throughput, so reconstructed rates are withheld. Every report currently carries an evidence warning.
+- Pipeline 1.2.0 reconstructs full-run throughput only from reconciled retained request/token records. Native throughput and timing remain visible for audit; native timing inconsistencies receive explicit findings. Missing or sampled records withhold reconstructed throughput.
 - Completion requires a succeeded source job, the configured request target, reconciled request counts, and no errors/incomplete requests. It does not qualify accuracy, joint latency SLOs or production readiness.
 - Failed attempts with native partial measurements retain those measurements. Earlier failures without retained artifacts produce a failure-evidence page with no invented metrics.
 - Missing values remain **Not measured**. AMX capability does not establish kernel execution.

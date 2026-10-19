@@ -124,7 +124,7 @@ class BenchmarkRequest(BaseModel):
     max_errors: int | None = Field(default=5, ge=1)
     benchmark_mode: str = "concurrent"
     max_duration_seconds: int = Field(default=600, ge=1, le=86400)
-    cooldown_seconds: int = Field(default=5, ge=0, le=3600)
+    cooldown_seconds: int = Field(default=0, ge=0, le=3600, description="Deprecated: accepted for compatibility; measurement cooldown is disabled for full-run timing")
     seed: int = 42
     sweep_size: int = Field(default=10, ge=3, le=100)
     sweep_strategy_type: str = "poisson"
