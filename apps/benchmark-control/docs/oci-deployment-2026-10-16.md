@@ -1,6 +1,6 @@
 # OCI deployment — 2026-10-16
 
-Current endpoint: **http://150.136.100.214:8080** — managed benchmark environment fix, HTTP port 8080, original automatic local session, and OCI resource principals enabled. Earlier deployments below are retained as history.
+Current endpoint (2026-10-19): **http://158.101.111.62:8080** — timing correction and report pipeline 1.2.0, HTTP port 8080, original automatic local session, and OCI resource principals enabled. Earlier deployments below are retained as history.
 
 - Endpoint: https://129.213.153.136
 - Region: us-ashburn-1
@@ -181,3 +181,78 @@ http://158.101.111.178:8080. The user must re-add the existing VM SSH connection
 private keys cannot be exported through the API. Earlier app data and inference
 VM files were left intact. A new real benchmark requires that SSH connection;
 no new inference benchmark was run as part of deployment validation.
+
+## Report presentation 1.1.0 deployment
+
+- Endpoint: http://150.136.10.218:8080
+- Instance: aig-benchmark-control-20261016-reports-v11
+- Instance OCID: `ocid1.computecontainerinstance.oc1.iad.anuwcljsrmrvwliano2dgowucugbonv5hilfqtifyj436sjp2pl7i73unmwa`
+- Public IP: 150.136.10.218; private IP: 10.3.200.248
+- Image: `us-ashburn-1.ocir.io/idhpsi4njgc8/aig-benchmark-control/private-app@sha256:dde78fe78142fd7c09967e98dfc52b80b4e7aa3c9971d324374b2ac46328c8b9`
+- OCIR tag: `report-layout-20261016`
+- Region: us-ashburn-1; VCN: OKE-VCN-01; subnet: k8sapipublic.
+- Shape: CI.Standard.A1.Flex, 1 OCPU, 4 GB memory.
+- API resource principal enabled; dedicated report worker principal disabled.
+- Public HTTP on port 8080 with the original automatic local session behavior.
+
+The new image includes the reference-based catalogue, attempt cards and summary
+counts, combined search and six filters, responsive detail pages, accessible
+chart readouts, attempt summaries and retained run-data/evidence tables. Report
+pipeline 1.1.0 creates fresh report identities while keeping the existing metric
+methodology and data schema. The trace and managed benchmark environment fixes
+remain included. All 75 tests passed both locally and in the deployment image.
+
+Both OCI containers are ACTIVE and running the pinned image above. Live checks
+passed for HTTP health, automatic sessions, resource-principal validation and
+read-only listing of 13 accessible compartments. No IAM or shared subnet policy
+changes were made. The replacement VNIC uses the prior app's route override.
+
+Saved vLLM configuration profiles are copied through the app API. SSH credentials
+cannot be exported through that API and must be re-added in VM Connection. This
+instance has a fresh ephemeral database/artifact volume; existing benchmark jobs
+and generated report bundles remain on the prior app at
+http://150.136.100.214:8080. That app and the inference VM were not restarted,
+stopped or deleted. No inference benchmark or synthetic benchmark evidence was
+added to the production app as part of deployment verification.
+
+## Timing correction deployment — 2026-10-19
+
+- Endpoint: http://158.101.111.62:8080
+- Instance: aig-benchmark-control-20261019-timing-fixed
+- Instance OCID: `ocid1.computecontainerinstance.oc1.iad.anuwcljsrmrvwliag2oipdrd7mhrehmgxvfasysptrtqw52txz2mb26gkesa`
+- Public IP: 158.101.111.62; private IP: 10.3.200.103.
+- Image: `us-ashburn-1.ocir.io/idhpsi4njgc8/aig-benchmark-control/private-app@sha256:21256b3f7ed0f7cc1107a33aeaaae4c5dcbd780850a048e5f583f28719145baf`
+- Private OCIR tag: `timing-fix-20261019`.
+- Region: us-ashburn-1; VCN: OKE-VCN-01; subnet: k8sapipublic.
+- Shape: CI.Standard.A1.Flex, 1 OCPU, 4 GB memory.
+- API resource principal enabled; offline report worker principal disabled.
+- Direct public HTTP port 8080; original automatic local session behavior.
+
+The runner uses null warmup/cooldown phases for full-run measurement, preserving
+request/duration/error guards. Legacy cooldown inputs remain accepted but are not
+applied. The misleading UI cooldown control was removed. Report pipeline 1.2.0
+uses reconciled retained request timestamps and actual successful output tokens
+for full-run throughput. Native measurements are retained for audit with specific
+consistency findings. Run columns lead with concurrency and retain job identity.
+
+All 84 tests passed locally and inside the ARM64 deployment image. Both containers
+are ACTIVE and running the pinned image. Live checks passed for public HTTP,
+automatic sessions, resource-principal validation, 13 accessible compartments,
+report API access, the corrected zero legacy cooldown default and updated UI.
+The VNIC inherits the existing subnet/VCN public default route. No shared route,
+security list or IAM policies were changed. No inference benchmark was launched
+and no inference VM was restarted as part of deployment verification.
+
+The previously recorded report-layout instance and VNIC returned OCI 404
+NotAuthorizedOrNotFound during this deployment, so a live profile/data migration
+from that instance was unavailable. It was not stopped, restarted or deleted by
+this deployment. The retained job 2 serving configuration from 2026-10-16 was
+restored and verified as profile 1, named `qwen-cpu-4b-INT8 (restored job 2)`.
+This is a historical configuration snapshot, not a claim about later edits.
+SSH credentials were not copied; add the VM connection through the app.
+
+The new instance has a fresh shared ephemeral database/artifact volume. Existing
+benchmark jobs and report bundles were not imported. Retained local job 2 evidence
+and the regenerated offline report remain on the workstation; availability of
+prior OCI data cannot be established from the stale deployment record. Stop,
+restart or deletion of the new instance loses its ephemeral data.

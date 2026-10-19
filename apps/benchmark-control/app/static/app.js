@@ -1198,7 +1198,6 @@ $("runBenchmarkBtn").onclick = async () => {
         benchmark_mode: $("benchmarkMode").value,
         max_duration_seconds: Number($("maxDurationSeconds").value),
         max_errors: $("maxErrors").value ? Number($("maxErrors").value) : null,
-        cooldown_seconds: Number($("cooldownSeconds").value),
         seed: Number($("benchmarkSeed").value),
         sweep_size: Number($("sweepSize").value),
         sweep_strategy_type: $("sweepStrategyType").value
