@@ -1,6 +1,6 @@
 # OCI deployment — 2026-10-16
 
-Current endpoint (2026-10-19): **http://158.101.111.62:8080** — timing correction and report pipeline 1.2.0, HTTP port 8080, original automatic local session, and OCI resource principals enabled. Earlier deployments below are retained as history.
+Current endpoint (2026-10-19): **http://129.213.39.17:8080** — report pipeline 1.2.1 with concurrency-only headings, connected to the existing inference VM, HTTP port 8080, original automatic local session, and OCI resource principals enabled. Earlier deployments below are retained as history.
 
 - Endpoint: https://129.213.153.136
 - Region: us-ashburn-1
@@ -256,3 +256,40 @@ benchmark jobs and report bundles were not imported. Retained local job 2 eviden
 and the regenerated offline report remain on the workstation; availability of
 prior OCI data cannot be established from the stale deployment record. Stop,
 restart or deletion of the new instance loses its ephemeral data.
+
+## Concurrency headings and existing-VM deployment — 2026-10-19
+
+- Endpoint: http://129.213.39.17:8080
+- Instance: aig-benchmark-control-20261019-concurrency-headings
+- Instance OCID: `ocid1.computecontainerinstance.oc1.iad.anuwcljsrmrvwliaibsjamyor7exo3nff3w5e57r27ahs7omshtt627ppaia`
+- Public IP: 129.213.39.17; private IP: 10.3.200.153.
+- Image: `us-ashburn-1.ocir.io/idhpsi4njgc8/aig-benchmark-control/private-app@sha256:d81d8a118f5e8380a56d5f2750eb157d63bef3a21e4f06f94598533c1233eb68`
+- Private OCIR tag: `concurrency-headings-20261019`.
+- Source commit: `200f71e`; report pipeline: 1.2.1.
+- Same us-ashburn-1 region, OKE-VCN-01 VCN, k8sapipublic subnet,
+  CI.Standard.A1.Flex shape with 1 OCPU and 4 GB memory.
+- API resource principal enabled; offline report worker principal disabled.
+- Direct HTTP port 8080 with the existing automatic local-session behavior.
+
+The image includes concurrency-only run column headings for single-attempt
+reports, with the job shown once above the table. Retry columns use attempt labels
+and an attempt/job mapping above the table. Existing timing corrections remain.
+All 84 tests passed in the deployment image. Both OCI containers are ACTIVE and
+running the pinned digest. Public health, corrected timing defaults, report API
+access, OCI principal validation and compartment listing passed verification.
+
+The existing inference VM is `ubuntu@129.213.46.180`, not the older VM address
+from the October 16 deployment history. VM profile 1 is `aig-bench-a6x01-ssh`.
+The user-supplied SSH key was verified against this VM and configured through the
+new app API without logging the private key. SSH from the new app was verified
+through read-only runtime discovery: vLLM PID 10941, port 8000, alive. A direct
+read-only SSH check confirmed HTTP health and model listing; the existing server
+is Qwen/Qwen3-4B-Base INT8 with the ZenDNN backend.
+
+Both vLLM profiles were copied and verified from the prior app: profile 1
+`qwen-cpu-4b-INT8 (restored job 2)` and profile 2 `qwen-cpu-4b-bf16`. The INT8
+configuration matches the currently running runtime. The VM was not provisioned,
+restarted or run through VM Setup; no benchmark was launched for verification.
+The previous app at http://158.101.111.62:8080 remains intact. New app storage is
+fresh and ephemeral: prior benchmark jobs and report bundles were not imported.
+No shared network routes, security lists or IAM policies were changed.

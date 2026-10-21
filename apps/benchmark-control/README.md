@@ -131,3 +131,5 @@ See [Reports module](docs/reporting.md) for usage, queue recovery, artifact stor
 ## Kernel tracing (0.3.1)
 
 Save a separate runtime profile with **Enable kernel tracing (diagnostic only)** checked, restart the runtime with that profile, then use **Capture Kernel Trace**. Select its `trace_runtime` job in **Queue** to download the worker traces, execution log and operator summary. Tracing defaults to off and trace-enabled profiles cannot run performance benchmarks. See [Kernel tracing](docs/kernel-tracing.md) for the capture sequence, evidence interpretation and limits.
+
+Completed reports can be archived automatically to a private OCI Object Storage bucket with verified checksums and expiring download links that work while the app is off. See [private OCI report archive configuration](docs/reporting.md#private-oci-report-archive).

@@ -159,6 +159,13 @@ class Database:
             self.connect().executescript(SCHEMA)
             from .reporting import REPORT_SCHEMA
             self.connect().executescript(REPORT_SCHEMA)
+            for column, definition in {
+                "archive_status": "TEXT NOT NULL DEFAULT 'pending'",
+                "archive_attempts": "INTEGER NOT NULL DEFAULT 0",
+                "archive_token": "TEXT", "archive_lease_until": "REAL",
+                "archive_metadata": "TEXT", "archive_error": "TEXT",
+            }.items():
+                self._ensure_column("report_jobs", column, definition)
             self._ensure_column("vm_setup_status", "benchmark_version", "TEXT")
             self._ensure_column("vm_setup_status", "runtime_evidence", "TEXT NOT NULL DEFAULT '{}'")
             self._ensure_column("vllm_profiles", "kernel_tracing_enabled", "INTEGER NOT NULL DEFAULT 0")

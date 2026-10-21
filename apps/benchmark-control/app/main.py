@@ -689,10 +689,42 @@ def generate_report(req: GenerateReportRequest, user: dict[str, Any] = Depends(c
 
 @app.get("/api/generated-reports")
 def generated_reports(user: dict[str, Any] = Depends(current_user)):
-    rows = db.all("SELECT id,title,status,stage,progress,summary,error_message,attempts,created_at,finished_at FROM report_jobs WHERE owner_user_id=? ORDER BY id DESC LIMIT 200", (user["id"],))
+    from .report_archive import enabled
+    rows = db.all("SELECT id,title,status,stage,progress,summary,error_message,attempts,created_at,finished_at,archive_status,archive_error FROM report_jobs WHERE owner_user_id=? ORDER BY id DESC LIMIT 200", (user["id"],))
     for row in rows:
         row['summary'] = json.loads(row['summary']) if row['summary'] else None
+        if not enabled() and row['archive_status'] != 'ready':
+            row['archive_status'] = 'disabled'
     return rows
+
+
+@app.post("/api/generated-reports/{report_id}/archive/retry")
+def retry_report_archive(report_id: int, user: dict[str, Any] = Depends(current_user)):
+    from .report_archive import enabled
+    if not enabled():
+        raise HTTPException(status_code=409, detail='Report archiving is not configured')
+    row = db.one('SELECT * FROM report_jobs WHERE id=? AND owner_user_id=?', (report_id,user['id']))
+    if not row:
+        raise HTTPException(status_code=404, detail='Report not found')
+    updated = db.execute("UPDATE report_jobs SET archive_status='pending',archive_attempts=0,archive_error=NULL,archive_lease_until=NULL WHERE id=? AND status='succeeded' AND archive_status='failed'", (report_id,))
+    if updated.rowcount != 1:
+        raise HTTPException(status_code=409, detail='Only failed archives can be retried')
+    return {'status':'pending'}
+
+
+@app.post("/api/generated-reports/{report_id}/archive/download-link")
+def report_archive_link(report_id: int, response: Response, user: dict[str, Any] = Depends(current_user)):
+    from .report_archive import download_link
+    row = db.one('SELECT archive_status,archive_metadata FROM report_jobs WHERE id=? AND owner_user_id=?', (report_id,user['id']))
+    if not row:
+        raise HTTPException(status_code=404, detail='Report not found')
+    if row['archive_status'] != 'ready':
+        raise HTTPException(status_code=409, detail='Verified archive is not ready')
+    response.headers['Cache-Control'] = 'private, no-store'
+    try:
+        return download_link(json.loads(row['archive_metadata']))
+    except Exception:
+        raise HTTPException(status_code=502, detail='Could not create archive download link; check OCI permissions') from None
 
 
 @app.post("/api/generated-reports/{report_id}/retry")

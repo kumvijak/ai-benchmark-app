@@ -1,6 +1,7 @@
 /* Dedicated reporting queue and catalogue. All dynamic content uses text nodes. */
 const reportSourceSelection = new Set();
 let generatedReportsCache = [];
+const reportArchiveLinks = new Map();
 let reportRefreshBusy = false;
 let reportSourceSignature = '';
 let reportCatalogueSignature = '';
@@ -55,6 +56,36 @@ function renderGeneratedCatalogue() {
           link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
         }));
       }
+    }
+    if (report.status === 'succeeded') {
+      const archiveStatus = document.createElement('p');
+      archiveStatus.textContent = `Archive: ${report.archive_status}${report.archive_error ? ' · ' + report.archive_error : ''}`;
+      card.append(archiveStatus);
+      if (report.archive_status === 'ready') actions.append(reportButton('Create independent ZIP link', async () => {
+        const result = await api(`/api/generated-reports/${report.id}/archive/download-link`, {method:'POST', body:'{}'});
+        reportArchiveLinks.set(report.id, result);
+        renderGeneratedCatalogue();
+      }));
+      if (reportArchiveLinks.has(report.id)) {
+        const result = reportArchiveLinks.get(report.id);
+        const panel = document.createElement('div');
+        const link = document.createElement('a'); link.href = result.url; link.textContent = 'Download archived ZIP';
+        link.rel = 'noopener noreferrer'; link.referrerPolicy = 'no-referrer';
+        const input = document.createElement('input'); input.type = 'text'; input.readOnly = true; input.value = result.url;
+        input.setAttribute('aria-label', 'Independent archive download URL');
+        input.onclick = () => input.select();
+        const note = document.createElement('p');
+        note.textContent = `Save this link before shutting down the app. Works until ${new Date(result.expires_at).toLocaleString()}. Anyone with the link can download this ZIP.`;
+        panel.append(link, input, reportButton('Copy link', async () => {
+          try { await navigator.clipboard.writeText(result.url); toast('Link copied'); }
+          catch (_) { input.focus(); input.select(); toast('Select and copy the link above'); }
+        }), note);
+        card.append(panel);
+      }
+      if (report.archive_status === 'failed') actions.append(reportButton('Retry archive', async () => {
+        await api(`/api/generated-reports/${report.id}/archive/retry`, {method:'POST',body:'{}'});
+        await refreshGeneratedReports();
+      }));
     }
     if (report.status === 'failed') actions.append(reportButton('Retry report', async () => {
       await api(`/api/generated-reports/${report.id}/retry`, {method:'POST',body:'{}'});
