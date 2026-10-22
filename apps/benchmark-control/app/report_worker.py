@@ -81,14 +81,56 @@ class ReportWorker:
             heartbeat_stop.set()
             keeper.join(timeout=2)
 
+    def archive_one(self):
+        from .report_archive import enabled, archive_report
+        if not enabled():
+            return False
+        con = self.db.connect()
+        with self.db._lock:
+            con.execute('BEGIN IMMEDIATE')
+            try:
+                row = con.execute("SELECT * FROM report_jobs WHERE status='succeeded' AND archive_status IN ('pending','uploading') AND archive_attempts<3 AND (archive_lease_until IS NULL OR archive_lease_until<?) ORDER BY id LIMIT 1", (time.time(),)).fetchone()
+                if row is None:
+                    con.commit()
+                    return False
+                job = dict(row)
+                token = uuid.uuid4().hex
+                con.execute("UPDATE report_jobs SET archive_status='uploading',archive_token=?,archive_lease_until=?,archive_attempts=archive_attempts+1 WHERE id=?", (token,time.time()+60,job['id']))
+                con.commit()
+            except Exception:
+                con.rollback()
+                raise
+        stop = threading.Event()
+        def renew():
+            try:
+                while not stop.wait(10):
+                    self.db.execute("UPDATE report_jobs SET archive_lease_until=? WHERE id=? AND archive_token=?", (time.time()+60,job['id'],token))
+            finally:
+                self.db.connect().close()
+        keeper = threading.Thread(target=renew, daemon=True)
+        keeper.start()
+        try:
+            metadata = archive_report(self.root/str(job['owner_user_id'])/str(job['id'])/job['artifact_token'], job)
+            self.db.execute("UPDATE report_jobs SET archive_status='ready',archive_metadata=?,archive_error=NULL,archive_token=NULL,archive_lease_until=NULL WHERE id=? AND archive_token=?", (json.dumps(metadata),job['id'],token))
+        except Exception as exc:
+            log.warning('Report archive %s failed (%s)', job['id'], type(exc).__name__)
+            # SDK exceptions may contain request URLs; never persist bearer links.
+            self.db.execute("UPDATE report_jobs SET archive_status=CASE WHEN archive_attempts>=3 THEN 'failed' ELSE 'pending' END,archive_error='Archive upload or verification failed; check bucket configuration and OCI permissions',archive_token=NULL,archive_lease_until=? WHERE id=? AND archive_token=?", (time.time()+30,job['id'],token))
+        finally:
+            stop.set()
+            keeper.join(timeout=2)
+        return True
+
     def run(self):
         try:
             while not self._stop.is_set():
                 try:
+                    self.db.execute("UPDATE report_jobs SET archive_status='failed',archive_token=NULL,archive_error='Archive worker interrupted; retry archive' WHERE archive_status='uploading' AND archive_attempts>=3 AND archive_lease_until<?", (time.time(),))
+                    archived = self.archive_one()
                     job = self.claim()
                     if job:
                         self.process(job)
-                    else:
+                    elif not archived:
                         self._stop.wait(1)
                 except Exception:
                     log.exception('Reporting queue polling failed')

@@ -244,6 +244,27 @@ class ReportApiTests(ReportTestCase):
         self.assertEqual(self.client.get('/api/generated-reports',headers={'Authorization':'Bearer token-2'}).json(),[])
         self.assertEqual(self.client.post(f'/api/generated-reports/{rid}/retry',headers=self.headers).status_code,409)
 
+    def test_archive_link_owner_readiness_and_retry(self):
+        rid = self.queue([self.job()])
+        route = f'/api/generated-reports/{rid}/archive/download-link'
+        self.assertEqual(self.client.post(route).status_code, 401)
+        self.assertEqual(self.client.post(route,headers={'Authorization':'Bearer token-2'}).status_code, 404)
+        self.assertEqual(self.client.post(route,headers=self.headers).status_code, 409)
+        self.worker.process(self.worker.claim())
+        self.db.execute("UPDATE report_jobs SET archive_status='ready',archive_metadata='{}' WHERE id=?", (rid,))
+        with patch('app.report_archive.download_link',return_value={'url':'https://storage.example/p/secret','expires_at':'future'}) as create:
+            response = self.client.post(route,headers=self.headers)
+            self.assertEqual(response.status_code,200)
+            self.assertIn('no-store',response.headers['cache-control'])
+            self.assertEqual(response.json()['url'],'https://storage.example/p/secret')
+            create.assert_called_once()
+        self.db.execute("UPDATE report_jobs SET archive_status='failed',archive_attempts=3 WHERE id=?", (rid,))
+        with patch.dict(os.environ,APP_REPORT_ARCHIVE_BUCKET='benchmark'):
+            response = self.client.post(f'/api/generated-reports/{rid}/archive/retry',headers=self.headers)
+        self.assertEqual(response.status_code,200)
+        row = self.db.one('SELECT archive_status,archive_attempts FROM report_jobs WHERE id=?',(rid,))
+        self.assertEqual(row,{'archive_status':'pending','archive_attempts':0})
+
     def test_failed_report_retry_and_frozen_sources(self):
         rid=self.queue([self.job()]);self.db.execute("UPDATE report_jobs SET status='failed' WHERE id=?",(rid,))
         response=self.client.post(f'/api/generated-reports/{rid}/retry',headers=self.headers)

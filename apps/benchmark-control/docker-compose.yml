@@ -10,6 +10,11 @@ services:
       APP_REPORT_WORKER_MODE: "external"
       APP_DB_PATH: "/data/app.db"
       APP_ARTIFACT_DIR: "/data/artifacts"
+      APP_REPORT_ARCHIVE_BUCKET: "${APP_REPORT_ARCHIVE_BUCKET:-}"
+      APP_REPORT_ARCHIVE_REGION: "${APP_REPORT_ARCHIVE_REGION:-us-ashburn-1}"
+      APP_REPORT_ARCHIVE_NAMESPACE: "${APP_REPORT_ARCHIVE_NAMESPACE:-}"
+      APP_REPORT_ARCHIVE_AUTH: "${APP_REPORT_ARCHIVE_AUTH:-principal}"
+      APP_REPORT_ARCHIVE_LINK_HOURS: "${APP_REPORT_ARCHIVE_LINK_HOURS:-168}"
     volumes:
       - benchmark-control-data:/data
 
@@ -20,6 +25,11 @@ services:
     environment:
       APP_DB_PATH: "/data/app.db"
       APP_ARTIFACT_DIR: "/data/artifacts"
+      APP_REPORT_ARCHIVE_BUCKET: "${APP_REPORT_ARCHIVE_BUCKET:-}"
+      APP_REPORT_ARCHIVE_REGION: "${APP_REPORT_ARCHIVE_REGION:-us-ashburn-1}"
+      APP_REPORT_ARCHIVE_NAMESPACE: "${APP_REPORT_ARCHIVE_NAMESPACE:-}"
+      APP_REPORT_ARCHIVE_AUTH: "${APP_REPORT_ARCHIVE_AUTH:-principal}"
+      APP_REPORT_ARCHIVE_LINK_HOURS: "${APP_REPORT_ARCHIVE_LINK_HOURS:-168}"
     volumes:
       - benchmark-control-data:/data
 

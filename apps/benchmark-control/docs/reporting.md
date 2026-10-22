@@ -171,3 +171,89 @@ python -m unittest discover -s app/tests -p 'test_*.py'
 ```
 
 Tests cover grouping/retries, missing and failed measurements, latency conversion, ownership, path traversal, snapshot survival after deletion, checksums, ZIP integrity, concurrent claims, lease expiry, stale-worker fencing, escaping and serving-profile mismatch. Browser verification uses clearly labelled disposable fixtures; it does not establish benchmark validity or perform a cloud run.
+
+## Private OCI report archive
+
+Completed generated reports can be automatically copied to OCI Object Storage.
+Local generation and cloud archival have separate status: a cloud failure never
+removes a local report. With archiving configured, the worker also backfills
+existing completed reports whose local bundles remain available.
+
+Set these variables on **both the API and report worker** before deployment:
+
+```sh
+APP_REPORT_ARCHIVE_BUCKET=benchmark
+APP_REPORT_ARCHIVE_REGION=us-ashburn-1
+APP_REPORT_ARCHIVE_NAMESPACE=idhpsi4njgc8
+APP_REPORT_ARCHIVE_AUTH=principal
+APP_REPORT_ARCHIVE_LINK_HOURS=168
+```
+
+An empty bucket setting disables archiving. The bucket must already exist and
+have `NoPublicAccess`. `principal` uses OCI resource principals on Container
+Instances and instance principals on Compute. Enable resource principals for
+**both containers**. For local development, set `APP_REPORT_ARCHIVE_AUTH=config`
+and provide the standard OCI SDK config/key files to each process; an optional
+`OCI_CLI_PROFILE` selects the profile. Compose does not mount workstation
+credentials automatically.
+
+Grant the container dynamic group bucket inspection, object creation/overwrite
+and reads, plus permission to create and manage pre-authenticated requests for
+this bucket. Example policy statements (replace `REPORT_CONTAINER_GROUP` with
+the deployment's dynamic group; scope to the app compartment):
+
+```text
+Allow dynamic-group REPORT_CONTAINER_GROUP to read buckets in compartment sun-app-cmp where target.bucket.name = 'benchmark'
+Allow dynamic-group REPORT_CONTAINER_GROUP to manage objects in compartment sun-app-cmp where all {target.bucket.name = 'benchmark', any {request.permission = 'OBJECT_CREATE', request.permission = 'OBJECT_OVERWRITE', request.permission = 'OBJECT_READ'}}
+Allow dynamic-group REPORT_CONTAINER_GROUP to manage buckets in compartment sun-app-cmp where all {target.bucket.name = 'benchmark', request.permission = 'PAR_MANAGE'}
+```
+
+Supplying the namespace avoids a namespace discovery call. Bucket setup and IAM
+are deployment operations, not actions performed automatically by the app.
+
+The worker verifies local manifest hashes and ZIP contents, uploads `report.zip`,
+`metrics.csv`, `report.json` and `manifest.json` with transport SHA-256 validation,
+then reads every uploaded object's actual bytes back and compares SHA-256 hashes.
+Only then does archive status become `ready`. Objects use an owner/report/unique
+artifact-token prefix, avoiding collisions after database replacement. All HTML
+and evidence are inside the ZIP. SQLite and other app settings are not archived.
+
+Archival uses independent renewable leases with stale-worker fencing. Failures
+retry after 30 seconds, up to three claims; **Retry archive** resets a failed
+archive. Local files must remain available until verification succeeds. There
+is no automatic deletion of local bundles or bucket objects. Versioned buckets
+retain overwritten versions according to their configured lifecycle policies.
+
+On a ready report, **Create independent ZIP link** creates a read-only OCI
+pre-authenticated request for that single ZIP. Save or copy the returned link
+before shutting down the app. The link contacts Object Storage directly and
+works until expiry even if the app is deleted. New links and renewals require a
+running app with OCI permission; an existing URL cannot be extended. The default
+lifetime is seven days (configurable from 1 to 8760 hours). Anyone holding the URL
+can download the ZIP, so treat it as a bearer credential. Revoke it from OCI
+Object Storage's pre-authenticated requests list if necessary. URLs are returned
+only to the report owner with `Cache-Control: private, no-store`; they are not
+stored in the report catalogue or logs.
+
+Additional owner-authenticated API endpoints:
+
+- `POST /api/generated-reports/{id}/archive/retry`
+- `POST /api/generated-reports/{id}/archive/download-link`: `{url, expires_at}`
+
+For rollout verification, generate a disposable report, wait for archive `ready`,
+create a link, and fetch that URL directly without app cookies or Authorization.
+Compare the ZIP's SHA-256 to the worker's verified archive metadata and extract it
+to open `index.html`. The bucket must remain private. Provision a replacement
+only after preserving the current instance's ephemeral app data; archive storage
+alone does not restore the app's catalogue or settings.
+
+OCI references: [Object Storage IAM permissions](https://docs.oracle.com/en-us/iaas/Content/Identity/Reference/objectstoragepolicyreference.htm), [pre-authenticated requests](https://docs.oracle.com/en-us/iaas/Content/Object/Tasks/usingpreauthenticatedrequests.htm).
+
+Setup completed on 2026-10-19: private Standard bucket `benchmark` was created in
+`us-ashburn-1`, namespace `idhpsi4njgc8`, in the existing `sun-app-cmp` compartment,
+with object versioning enabled. The existing completed report #1 was copied and
+all four objects were read back with matching SHA-256 checksums. Its independent
+ZIP link was fetched without app credentials and matched the verified ZIP hash.
+Per the requested rollout decision, the running app has not been redeployed;
+automatic archival for future reports requires deploying this code with the
+configuration and worker permissions described above.
