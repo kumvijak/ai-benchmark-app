@@ -1,37 +1,22 @@
 <!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AI Inference Benchmark Control</title>
-  <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/static/styles.css">
-</head>
-<body>
-  <header>
-    <div>
-      <h1>AI Inference Benchmark Control</h1>
-      <p>Configure authentication, connect an Ubuntu VM, start vLLM, run GuideLLM benchmarks, and export reports.</p>
-    </div>
-    <div id="sessionStatus">Starting local session</div>
-  </header>
-
-  <main>
-    <nav class="tabs" aria-label="Workflow sections">
-      <button class="tab active" data-tab="auth">Authentication</button>
-      <button class="tab" data-tab="vm">VM Connection</button>
-      <button class="tab" data-tab="vllm">vLLM Config</button>
-      <button class="tab" data-tab="bench">Benchmarking</button>
-      <button class="tab" data-tab="queue">Queue</button>
-      <button class="tab" data-tab="generated">Reports</button>
-      <button class="tab" data-tab="report">Native Report</button>
-    </nav>
-
-    <section class="tab-panel active" id="tab-auth">
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CPU Benchmark Workspace</title><link rel="icon" href="data:,"><link rel="stylesheet" href="/static/styles.css"></head>
+<body><a class="skip-link" href="#workspace-content">Skip to workspace</a>
+<aside class="sidebar" id="workspace-navigation">
+ <button class="sidebar-close secondary" id="closeNavigationBtn" aria-label="Close navigation">×</button>
+ <a class="brand" href="/" aria-label="CPU Benchmark workspace"><span class="brand-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h10v10H7zM9 1v4M15 1v4M9 19v4M15 19v4M1 9h4M1 15h4M19 9h4M19 15h4"/></svg></span><span>CPU Benchmark<small>INFERENCE WORKSPACE</small></span></a>
+ <nav class="tabs" aria-label="Workflow sections"><p class="nav-label">CONFIGURATION</p><button class="tab active" id="nav-auth" data-tab="auth" aria-controls="tab-auth" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6l-8-3ZM9 12l2 2 4-4"/></svg><span>Authentication</span><span class="nav-arrow" aria-hidden="true">›</span></button><button class="tab" id="nav-vm" data-tab="vm" aria-controls="tab-vm" aria-current="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h16v6H4zM4 14h16v6H4zM7 7h.01M7 17h.01M11 7h6M11 17h6"/></svg><span>Compute hosts</span><span class="nav-arrow" aria-hidden="true">›</span></button><button class="tab" id="nav-vllm" data-tab="vllm" aria-controls="tab-vllm" aria-current="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h10v10H7zM9 1v4M15 1v4M9 19v4M15 19v4M1 9h4M1 15h4M19 9h4M19 15h4"/></svg><span>Model runtime</span><span class="nav-arrow" aria-hidden="true">›</span></button><p class="nav-label">WORKSPACE</p><button class="tab" id="nav-bench" data-tab="bench" aria-controls="tab-bench" aria-current="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg><span>Benchmarks</span><span class="nav-arrow" aria-hidden="true">›</span></button><button class="tab" id="nav-queue" data-tab="queue" aria-controls="tab-queue" aria-current="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5h12M9 12h12M9 19h12M3 5h.01M3 12h.01M3 19h.01"/></svg><span>Job queue</span><span class="nav-arrow" aria-hidden="true">›</span></button><button class="tab" id="nav-generated" data-tab="generated" aria-controls="tab-generated" aria-current="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 3v18h17M8 16v-5M13 16V7M18 16v-9"/></svg><span>Reports</span><span class="nav-arrow" aria-hidden="true">›</span></button><button class="tab" id="nav-report" data-tab="report" aria-controls="tab-report" aria-current="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H5v20h14V7l-5-5ZM14 2v6h5M8 12h8M8 16h6"/></svg><span>Native exports</span><span class="nav-arrow" aria-hidden="true">›</span></button></nav>
+ <div class="sidebar-footer"><span class="footer-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 3 8l9 5 9-5-9-5ZM3 12l9 5 9-5M3 16l9 5 9-5"/></svg></span><div>Built for CPU inference<small>OCI · vLLM · GuideLLM</small></div></div>
+</aside>
+<div class="workspace-shell">
+ <header class="workspace-topbar"><div class="topbar-left"><button class="menu-toggle secondary" id="navigationToggle" aria-label="Toggle navigation" aria-controls="workspace-navigation" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button><span class="breadcrumb">Workspace <span aria-hidden="true">/</span> <strong id="workspaceBreadcrumb">Authentication</strong></span></div><div class="session"><span class="session-avatar" aria-hidden="true">U</span><span id="sessionStatus" role="status">Connecting session…</span></div></header>
+ <main id="workspace-content" tabindex="-1">
+  <div class="page-heading"><div><p class="eyebrow">CPU INFERENCE</p><h1 id="workspaceTitle">Authentication</h1><p id="workspaceDescription">Set up secure cloud access for your workspace.</p></div><button class="secondary refresh-button" id="refreshWorkspaceBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-2l2 2M4 17l2 2a7 7 0 0 0 12-2"/></svg><span>Refresh workspace</span></button></div>
+  <section class="tab-panel active" id="tab-auth" aria-labelledby="nav-auth">
       <div class="section-head">
         <div>
-          <h2>Authentication</h2>
-          <p>Validate the Oracle Cloud authentication mode the tool should use for cloud-side operations. VM SSH is configured separately in the VM Connection tab.</p>
+          <h2>Cloud access</h2>
+          <p>Connect an Oracle Cloud profile to provision and manage your benchmark hosts.</p>
         </div>
         <span class="pill" id="authState">Not validated</span>
       </div>
@@ -53,31 +38,36 @@
         <div class="grid two">
           <label data-help="Friendly name for this OCI authentication profile. Enter the exact profile header from the pasted OCI config, such as DEFAULT if that is the header you are using.">Profile name<input id="ociProfileName" placeholder="Profile header, for example DEFAULT"></label>
           <label data-help="OCI API private key that matches the fingerprint in the pasted OCI profile. The file is uploaded for validation and stored encrypted.">Private key file<input id="ociKeyFile" type="file" accept=".pem,.key,.txt"></label>
-          <label class="wide" data-help="OCI config profile block containing tenancy, user, fingerprint, key_file reference, and region. The app validates this before OCI VM actions.">OCI profile<textarea id="ociProfileText" rows="9" spellcheck="false" placeholder="[DEFAULT]&#10;user=ocid1.user...&#10;fingerprint=...&#10;tenancy=ocid1.tenancy...&#10;region=us-ashburn-1"></textarea></label>
+          <label class="wide" data-help="OCI config profile block containing tenancy, user, fingerprint, key_file reference, and region. The app validates this before OCI VM actions.">OCI profile<textarea id="ociProfileText" rows="9" spellcheck="false" placeholder="[DEFAULT]
+user=ocid1.user...
+fingerprint=...
+tenancy=ocid1.tenancy...
+region=us-ashburn-1"></textarea></label>
           <p class="file-hint wide" id="ociKeyHint">No private key file selected.</p>
         </div>
       </div>
-      <div class="auth-memory">
+      <div class="actions">
+        <button id="addAuthProfileBtn">Add &amp; Validate Profile</button>
+        <button id="validateSelectedAuthBtn" class="secondary">Validate Selected Profile</button>
+        <button id="deleteAuthProfileBtn" class="secondary danger">Delete Selected Auth Profile</button>
+      </div>
+      <details class="output-details"><summary>Validation details</summary><pre id="authOutput">Choose an authentication mode and validate it.</pre>
+    </details><div class="auth-memory">
         <div class="subhead">
           <h3>Saved Authentication</h3>
           <p id="authSavedHint">Validated profiles are stored encrypted by the local app. Private keys are never restored into the browser after refresh.</p>
         </div>
-        <table id="authProfileTable"></table>
-      </div>
+        <div class="table-scroll" role="region" aria-label="authProfileTable table" tabindex="0"><table id="authProfileTable"></table>
+      </div></div>
 
-      <div class="actions">
-        <button id="addAuthProfileBtn">Add & Validate Profile</button>
-        <button id="validateSelectedAuthBtn" class="secondary">Validate Selected Profile</button>
-        <button id="deleteAuthProfileBtn" class="secondary">Delete Selected Auth Profile</button>
-      </div>
-      <pre id="authOutput">Choose an authentication mode and validate it.</pre>
-    </section>
+      </section>
 
-    <section class="tab-panel" id="tab-vm">
+
+<section class="tab-panel" id="tab-vm" aria-labelledby="nav-vm">
       <div class="section-head">
         <div>
-          <h2>VM Connection</h2>
-          <p>Create a guide-approved OCI Ubuntu VM or connect an existing host. New OCI VMs automatically create and test an SSH profile after deployment.</p>
+          <h2>Host configuration</h2>
+          <p>Create a CPU virtual machine or connect an existing Ubuntu host.</p>
         </div>
         <span class="pill">Compute and SSH gate</span>
       </div>
@@ -124,7 +114,7 @@
         </div>
         <div class="actions">
           <button id="createVmBtn">Create VM and Test SSH</button>
-          <button id="destroyVmBtn">Destroy Selected VM</button>
+          <button id="destroyVmBtn" class="danger">Destroy Selected VM</button>
         </div>
         <div id="vmDeployProgress" class="progress-panel hidden" aria-live="polite">
           <div class="progress-row">
@@ -136,8 +126,8 @@
           </div>
           <div id="vmDeployStage" class="progress-stage">No deployment in progress.</div>
         </div>
-        <table id="ociInstanceTable"></table>
-      </div>
+        <div class="table-scroll" role="region" aria-label="ociInstanceTable table" tabindex="0"><table id="ociInstanceTable"></table>
+      </div></div>
 
       <div id="existingVmPanel" class="form-block hidden">
         <div class="subhead">
@@ -158,24 +148,25 @@
           <button id="healthBtn">Run SSH Health Check</button>
         </div>
       </div>
-      <table id="vmTable"></table>
-      <div class="actions">
-        <button id="deleteVmBtn" class="secondary">Delete Selected VM Profile</button>
+      <div class="table-scroll" role="region" aria-label="vmTable table" tabindex="0"><table id="vmTable"></table>
+      </div><div class="actions">
+        <button id="deleteVmBtn" class="secondary danger">Delete Selected VM Profile</button>
       </div>
       <div class="job-detail">
         <div class="subhead">
           <h3>VM Setup Status</h3>
           <p>Root volume expansion, vLLM installation, and GuideLLM readiness are updated during SSH validation.</p>
         </div>
-        <table id="vmSetupTable"></table>
-      </div>
+        <div class="table-scroll" role="region" aria-label="vmSetupTable table" tabindex="0"><table id="vmSetupTable"></table>
+      </div></div>
     </section>
 
-    <section class="tab-panel" id="tab-vllm">
+
+<section class="tab-panel" id="tab-vllm" aria-labelledby="nav-vllm">
       <div class="section-head">
         <div>
-          <h2>vLLM Configuration</h2>
-          <p>Define the exact runtime command and CPU environment variables. Every benchmark stores the selected vLLM profile and model reference.</p>
+          <h2>Runtime configuration</h2>
+          <p>Choose your model, precision and serving parameters. Save a profile to reuse it across runs.</p>
         </div>
         <span class="pill">Runtime profile</span>
       </div>
@@ -202,24 +193,25 @@
         <button id="stopRuntimeBtn" class="secondary">Stop Selected Runtime</button>
         <button id="refreshRuntimeBtn" class="secondary">Refresh Runtime Processes</button>
       </div>
-      <table id="vllmTable"></table>
-      <div class="actions">
-        <button id="deleteVllmBtn" class="secondary">Delete Selected vLLM Profile</button>
+      <div class="table-scroll" role="region" aria-label="vllmTable table" tabindex="0"><table id="vllmTable"></table>
+      </div><div class="actions">
+        <button id="deleteVllmBtn" class="secondary danger">Delete Selected vLLM Profile</button>
       </div>
       <div class="job-detail">
         <div class="subhead">
           <h3>Running vLLM Processes</h3>
           <p>Live process discovery from the selected VM. Select a process before stopping it.</p>
         </div>
-        <table id="runtimeProcessTable"></table>
-      </div>
+        <div class="table-scroll" role="region" aria-label="runtimeProcessTable table" tabindex="0"><table id="runtimeProcessTable"></table>
+      </div></div>
     </section>
 
-    <section class="tab-panel" id="tab-bench">
+
+<section class="tab-panel" id="tab-bench" aria-labelledby="nav-bench">
       <div class="section-head">
         <div>
-          <h2>Benchmarking</h2>
-          <p>Select a workload profile from the initial guide or choose custom values. Presets define input/output token targets and recommended concurrency streams.</p>
+          <h2>Configure a benchmark</h2>
+          <p>Select a host, runtime and workload, then define the load you want to measure.</p>
         </div>
         <span class="pill">Real streaming requests</span>
       </div>
@@ -255,8 +247,9 @@
       </div>
     </section>
 
-    <section class="tab-panel" id="tab-generated">
-      <div class="section-head"><div><h2>Reports</h2><p>Generate MLCommons-style reports from retained benchmark evidence. Reports run on a dedicated queue and remain available after VM termination.</p></div><span class="pill">Offline HTML · CSV · JSON · ZIP</span></div>
+
+<section class="tab-panel" id="tab-generated" aria-labelledby="nav-generated">
+      <div class="section-head"><div><h2>Build a report collection</h2><p>Compare completed attempts in an offline report with charts, configuration details and evidence.</p></div><span class="pill">Offline HTML · CSV · JSON · ZIP</span></div>
       <div class="form-grid">
         <label>Report title<input id="generatedTitle" maxlength="160" value="CPU inference benchmark report"></label>
         <label>Filter reports<input id="generatedFilter" type="search" placeholder="Title or report ID"></label>
@@ -269,11 +262,12 @@
       <div id="generatedCatalogue"></div>
     </section>
 
-    <section class="tab-panel" id="tab-report">
+
+<section class="tab-panel" id="tab-report" aria-labelledby="nav-report">
       <div class="section-head">
         <div>
-          <h2>Report</h2>
-          <p>Select a successful benchmark job to render its report. Failed and running jobs are visible in the benchmark table but cannot produce reports.</p>
+          <h2>Original benchmark exports</h2>
+          <p>Select a successful benchmark in the job queue to inspect and download its GuideLLM results.</p>
         </div>
         <span class="pill">Copy and download</span>
       </div>
@@ -287,11 +281,12 @@
       <div id="reportOutput" class="report-output empty">Run a benchmark and select a successful benchmark job.</div>
     </section>
 
-    <section class="tab-panel" id="tab-queue">
+
+<section class="tab-panel" id="tab-queue" aria-labelledby="nav-queue">
       <div class="section-head">
         <div>
-          <h2>Queue</h2>
-          <p>Monitor queued, running, succeeded, and failed jobs. This view refreshes every 5 seconds and shows failure logs when a failed job is selected.</p>
+          <h2>Execution queue</h2>
+          <p>Follow job progress and inspect results or failure details. Updates every five seconds.</p>
         </div>
         <span class="pill" id="queueRefreshState">Auto refresh on</span>
       </div>
@@ -301,9 +296,9 @@
         <span>Succeeded: 0</span>
         <span>Failed: 0</span>
       </div>
-      <table id="queueTable"></table>
-      <div class="actions">
-        <button id="deleteJobBtn" class="secondary">Delete Selected Job</button>
+      <div class="table-scroll" role="region" aria-label="queueTable table" tabindex="0"><table id="queueTable"></table>
+      </div><div class="actions">
+        <button id="deleteJobBtn" class="secondary danger">Delete Selected Job</button>
       </div>
       <div class="job-detail">
         <div class="subhead">
@@ -313,10 +308,8 @@
         <pre id="queueLogOutput">No job selected.</pre>
       </div>
     </section>
-  </main>
 
-  <div id="toast"></div>
-  <script src="/static/app.js"></script>
-  <script src="/static/reports.js"></script>
-</body>
-</html>
+  <footer class="workspace-footer"><span>CPU Benchmark Workspace</span><span>Configure · Measure · Compare</span></footer>
+ </main>
+</div><div id="toast" role="status" aria-live="polite"></div>
+<script src="/static/app.js"></script><script src="/static/reports.js"></script></body></html>
