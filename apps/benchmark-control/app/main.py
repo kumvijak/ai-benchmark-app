@@ -29,7 +29,7 @@ secret_box = SecretBox(settings.app_secret)
 worker = Worker(db, secret_box, settings.artifact_dir)
 report_worker = ReportWorker(db, settings.artifact_dir)
 
-app = FastAPI(title="AI Inference Benchmark Control", version="0.3.2")
+app = FastAPI(title="AI Inference Benchmark Control", version="0.3.3")
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
 

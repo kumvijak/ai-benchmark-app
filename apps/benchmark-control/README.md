@@ -143,3 +143,7 @@ The RFP-inspired navy and mint workspace preserves the desktop sidebar and mobil
 ## CPU memory budget (0.3.2)
 
 The runtime form exposes **CPU memory utilization** (fraction greater than 0 and at most 1), mapped to vLLM `--gpu-memory-utilization` on CPU. New forms suggest 0.75, leaving headroom for the OS and runtime when KV cache is automatic. Explicit KV cache GiB still controls explicit cache allocation. Leaving the field blank omits the flag and uses the installed vLLM default. Existing profiles migrate with a blank value, preserving their previous launch behavior; select one, enter the desired fraction and save a new profile before starting it. The value is persisted, displayed in the profile table, and retained in runtime/report evidence.
+
+## Reference-style HTML reports (0.3.3)
+
+New report collections use the reviewed campaign report layout: report details, four labelled performance curves, hardware and runtime cards, a concurrency-column run table with highlighted Throughput/TTFT/TPOT/Query latency groups, measurement notes and source files. Concurrency charts use a log2 axis; guide lines connect recorded points within each attempt and break at missing measurements. Existing normalization, full-request-window timing, throughput, latency units, evidence checks, JSON groups and CSV measurements are unchanged. Pipeline version 1.3.0 creates a new report collection when the same jobs are selected, preserving previous downloads and archives.

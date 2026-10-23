@@ -87,7 +87,7 @@ class TimingTests(unittest.TestCase):
         self.assertEqual(point['reconstructed_system_tps'],5)
         self.assertEqual(point['full_run_tps_per_concurrency'],5)
         page=render_detail(group,'Timing regression')
-        self.assertIn('Full-run system TPS vs. concurrency',page)
+        self.assertIn('System TPS vs. concurrency',page)
         self.assertIn('GuideLLM native output tokens/s (audit)',page)
         self.assertIn('Native measurement ends after scheduler execution',page)
         self.assertEqual(page.count('<circle'),4)

@@ -14,7 +14,7 @@ import zipfile
 from .benchmark import _guidellm_benchmark_rows
 from .timing import audit_timing
 
-REPORT_VERSION = '1.2.1'
+REPORT_VERSION = '1.3.0'
 LEASE_SECONDS = 60
 MAX_ATTEMPTS = 3
 
@@ -221,20 +221,46 @@ def esc(value):
 
 
 def chart(points, x_key, y_key, title, x_label, y_label):
-    valid = [p for p in points if number(p.get(x_key)) is not None and number(p.get(y_key)) is not None]
+    # Axis geometry and guide lines only: metric values come from the existing points.
+    log_x = x_key == 'concurrency'
+    usable = lambda p: (number(p.get(x_key)) is not None and number(p.get(y_key)) is not None
+                        and (not log_x or p[x_key] > 0))
+    valid = [p for p in points if usable(p)]
     if not valid:
         return f'<section class="card chart"><h3>{esc(title)}</h3><p>Not measured — no usable points.</p></section>'
-    xmax = max([p[x_key] for p in valid] + [1]); ymax = max([p[y_key] for p in valid] + [1])
-    circles = ''
-    for point in valid:
-        x = 68 + 430 * point[x_key] / xmax; y = 240 - 190 * point[y_key] / ymax
-        label = f"Job {point['job_id']}, point {point['point_index']} · C{fmt(point['concurrency'])} · {x_label}: {fmt(point[x_key])} · {y_label}: {fmt(point[y_key])} · {point['outcome']} · {point['evidence_status']} evidence"
-        circles += f'<circle cx="{x:.2f}" cy="{y:.2f}" r="6" tabindex="0" aria-label="{esc(label)}" data-job="{point["job_id"]}" class="{point["outcome"]}"><title>{esc(label)}</title></circle>'
+    xmax = max(max(p[x_key] for p in valid) * 1.12, 1)
+    ymax = max(max(p[y_key] for p in valid) * 1.15, 1)
+    lo = min(0, math.floor(math.log2(min(p[x_key] for p in valid)))) if log_x else 0
+    hi = max(lo + 1, math.ceil(math.log2(max(p[x_key] for p in valid)))) if log_x else 1
+    x = lambda v: 77 + 475 * ((math.log2(v)-lo)/(hi-lo) if log_x else v/xmax)
+    y = lambda v: 248 - 228 * v/ymax
     ticks = ''
     for i in range(5):
-        x = 68 + 430 * i / 4; y = 240 - 190 * i / 4
-        ticks += f'<path d="M68 {y}H498" stroke="#e5eaf1"/><text x="58" y="{y+4}" text-anchor="end">{esc(round(ymax*i/4,2))}</text><text x="{x}" y="260" text-anchor="middle">{esc(round(xmax*i/4,2))}</text>'
-    return f'''<section class="card chart"><h3>{esc(title)}</h3><svg viewBox="0 0 560 300" role="group" aria-label="{esc(title)}">{ticks}<path d="M68 40V240H510" fill="none" stroke="#98a5b8"/>{circles}<text x="280" y="292" text-anchor="middle">{esc(x_label)}</text><text x="68" y="20">{esc(y_label)}</text></svg><p class="chart-readout note" aria-live="polite">Hover or focus a point for measurements.</p><p class="muted">Measured points only · no interpolation</p></section>'''
+        value = ymax*i/4; yy = y(value)
+        ticks += f'<path d="M77 {yy:.2f}H552" stroke="#e6ecf4"/><text x="65" y="{yy+4:.2f}" text-anchor="end">{esc(round(value,2))}</text>'
+    xticks = [2**i for i in range(lo, hi+1)] if log_x else [xmax*i/4 for i in range(5)]
+    for value in xticks:
+        ticks += f'<text x="{x(value):.2f}" y="271" text-anchor="middle">{esc(round(value,2))}</text>'
+    marks = ''
+    for jid in dict.fromkeys(p['job_id'] for p in points):
+        attempt = sorted((p for p in points if p['job_id'] == jid), key=lambda p: (p['concurrency'] or 0, p['point_index']))
+        segments = [[]]
+        for point in attempt:
+            if usable(point):
+                segments[-1].append(point)
+            elif segments[-1]:
+                segments.append([])  # Never draw across a withheld measurement.
+        lines = ''.join('<polyline points="'+' '.join(f'{x(p[x_key]):.2f},{y(p[y_key]):.2f}' for p in segment)+'" fill="none" stroke="#96b4d6" stroke-width="2"/>' for segment in segments if len(segment)>1)
+        dots = ''
+        for point in attempt:
+            if not usable(point):
+                continue
+            xx, yy = x(point[x_key]), y(point[y_key])
+            label = f"Job {point['job_id']}, point {point['point_index']} · C{fmt(point['concurrency'])} · {x_label}: {fmt(point[x_key])} · {y_label}: {fmt(point[y_key])} · {point['outcome']} · {point['evidence_status']} evidence"
+            dots += f'<circle cx="{xx:.2f}" cy="{yy:.2f}" r="5" tabindex="0" aria-label="{esc(label)}" data-job="{jid}" class="{point['outcome']}"><title>{esc(label)}</title></circle><text class="point-label" x="{xx-8 if xx>520 else xx+8:.2f}" y="{yy-9:.2f}" text-anchor="{'end' if xx>520 else 'start'}">C{esc(point['concurrency'])}</text>'
+        marks += f'<g data-series-job="{jid}">{lines}{dots}</g>'
+    axis_label = x_label + (' (log₂ scale)' if log_x else '')
+    return f'''<section class="card chart"><h3>{esc(title)}</h3><svg viewBox="0 0 570 310" role="group" aria-label="{esc(title)}">{ticks}<path d="M77 20V248H552" fill="none" stroke="#abb9ca"/>{marks}<text x="314" y="301" text-anchor="middle">{esc(axis_label)}</text><text transform="translate(18 134) rotate(-90)" text-anchor="middle">{esc(y_label)}</text></svg><p class="chart-readout note" aria-live="polite">Hover or focus a point for measurements.</p><p class="muted">Lines connect measured points within one attempt; no estimates between points.</p></section>'''
 
 
 CSS = """
@@ -329,6 +355,24 @@ a{color:inherit}
 .grid{gap:12px}
 }
 
+/* Reference report presentation: compact facts, labelled curves and metric groups. */
+.facts{grid-template-columns:repeat(2,minmax(0,1fr))}
+.run-table th,.run-table td{text-align:right;white-space:nowrap}
+.run-table th:first-child,.run-table td:first-child{text-align:left;min-width:245px}
+.run-table .section-row th{text-align:left;padding:13px 14px;font-size:14px;letter-spacing:.02em;position:static;color:#254561;background:#edf2f8;border-bottom:1px solid #d5dfeb}
+.run-table .throughput th{background:#e5f4ed;color:#176751;border-left:4px solid #1d8066}
+.run-table .ttft th{background:#e8f1fc;color:#195a9e;border-left:4px solid #1466c3}
+.run-table .tpot th{background:#f0eafa;color:#654495;border-left:4px solid #8060b0}
+.run-table .latency th{background:#fff3dc;color:#855514;border-left:4px solid #b9842b}
+.metric-jumps{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 18px}
+.metric-jumps a{padding:5px 12px;border:1px solid var(--border);border-radius:20px;background:#f6f8fb;font-size:12px}
+.point-label{font-size:11px;fill:#475569}
+.configuration-details{margin-top:18px}
+.configuration-details .grid,details .grid{margin-top:16px}
+.section-row{scroll-margin-top:16px}
+@media(max-width:760px){.run-table th:first-child,.run-table td:first-child{min-width:150px;max-width:175px;white-space:normal}.facts{gap:14px 18px}}
+@media print{.metric-jumps{display:none}.run-table th:first-child,.run-table td:first-child{min-width:150px;white-space:normal}.section-row th{print-color-adjust:exact}}
+
 """
 
 
@@ -400,18 +444,18 @@ def render_detail(group, title):
     labels = configuration_labels(c)
     model = profile.get('model_ref') or profile.get('source_model') or c['workload'].get('model_ref') or 'Model not recorded'
     charts = ''.join(chart(points, *args) for args in [
-        ('full_run_tps_per_concurrency','reconstructed_system_tps','Full-run TPS vs. tokens/s per concurrency','Full-run TPS / concurrency','Successful output tokens/s'),
-        ('concurrency','reconstructed_system_tps','Full-run system TPS vs. concurrency','Concurrency','Successful output tokens/s'),
-        ('concurrency','ttft_p95_ms','Time to first token P95 vs. concurrency','Concurrency','TTFT P95 (ms)'),
-        ('concurrency','full_run_tps_per_concurrency','Full-run TPS per concurrency vs. concurrency','Concurrency','Full-run TPS / concurrency')])
+        ('full_run_tps_per_concurrency','reconstructed_system_tps','System TPS vs. TPS per user','Full-run TPS / concurrency','Successful output tokens/s'),
+        ('concurrency','reconstructed_system_tps','System TPS vs. concurrency','Concurrency','Successful output tokens/s'),
+        ('concurrency','ttft_p95_ms','TTFT P95 vs. concurrency','Concurrency','TTFT P95 (ms)'),
+        ('concurrency','full_run_tps_per_concurrency','TPS per user vs. concurrency','Concurrency','Full-run TPS / concurrency')])
     fields = [('Run date','run_date'),('Concurrency','concurrency'),('Completion','outcome'),('Evidence','evidence_status'),
-              ('GuideLLM native output tokens/s (audit)','native_system_tps'),('Full-run successful output tokens/s','reconstructed_system_tps'),
-              ('Native timing consistency','native_timing_status'),('Full-run record check','full_run_status'),
-              ('Full request window (s)','full_run_duration_seconds'),('Successful output tokens','full_run_successful_output_tokens'),
-              ('Full-run TPS / concurrency','full_run_tps_per_concurrency'),
-              ('Native TPS / concurrency (audit)','aggregate_tps_per_concurrency'),('TTFT P95 (ms)','ttft_p95_ms'),
               ('Total requests','total_requests'),('Successful requests','successful_requests'),('Errored requests','errored_requests'),
-              ('Incomplete requests','incomplete_requests'),('Failed + incomplete','failed_requests'),('Native measurement duration (s)','duration_seconds')]
+              ('Incomplete requests','incomplete_requests'),('Failed + incomplete','failed_requests'),
+              ('Full-run successful output tokens/s','reconstructed_system_tps'),('Full-run TPS / concurrency','full_run_tps_per_concurrency'),
+              ('GuideLLM native output tokens/s (audit)','native_system_tps'),('Native TPS / concurrency (audit)','aggregate_tps_per_concurrency'),
+              ('Full request window (s)','full_run_duration_seconds'),('Successful output tokens','full_run_successful_output_tokens'),
+              ('Native measurement duration (s)','duration_seconds'),('Native timing consistency','native_timing_status'),
+              ('Full-run record check','full_run_status')]
     attempt_numbers = {jid: index+1 for index, jid in enumerate(group['attempts'])}
     multiple_attempts = len(attempt_numbers) > 1
     table_identity = ' · '.join(
@@ -421,13 +465,35 @@ def render_detail(group, title):
         '<th scope="col">' + (f'Concurrency {esc(p["concurrency"])}' if p['concurrency'] is not None else 'Concurrency not recorded')
         + (f'<br><span class="note">Attempt {attempt_numbers[p["job_id"]]}</span>' if multiple_attempts else '')
         + '</th>' for p in points) + '</tr>'
-    rows = ''.join('<tr><th scope="row">'+esc(label)+'</th>'+''.join('<td>'+(badge(p[key]) if key == 'outcome' else esc(p[key]))+'</td>' for p in points)+'</tr>' for label,key in fields)
-    for name,label in [('ttft','Time to first token'),('tpot','Time per output token'),('latency','Query latency')]:
-        for pct in ('min','mean','p50','p90','p95','p99','p999','max'):
-            rows += '<tr><th>'+esc(f'{label} {pct} (ms)')+'</th>'+''.join('<td>'+esc(p['latency_ms'][name].get(pct))+'</td>' for p in points)+'</tr>'
+    def section_row(label, kind, anchor):
+        return f'<tr class="section-row {kind}" id="{anchor}"><th colspan="{len(points)+1}">{esc(label)}</th></tr>'
+    rows = section_row('Run overview and request outcomes', 'overview', 'run-overview')
+    for label,key in fields:
+        if key == 'reconstructed_system_tps':
+            rows += section_row('Throughput — successful output tokens', 'throughput', 'throughput')
+        rows += '<tr><th scope="row">'+esc(label)+'</th>'+''.join('<td>'+(badge(p[key]) if key == 'outcome' else esc(p[key]))+'</td>' for p in points)+'</tr>'
+    for name,label in [('ttft','Time to First Token — TTFT (ms)'),('tpot','Time per Output Token — TPOT (ms)'),('latency','Query Latency (ms)')]:
+        rows += section_row(label, name, name)
+        if name == 'ttft':
+            rows += '<tr><th scope="row">TTFT P95 (ms)</th>'+''.join('<td>'+esc(p['ttft_p95_ms'])+'</td>' for p in points)+'</tr>'
+        for pct,caption in [('min','Minimum'),('mean','Average'),('p50','P50'),('p90','P90'),('p95','P95'),('p99','P99'),('p999','P99.9'),('max','Maximum')]:
+            rows += '<tr><th scope="row">'+esc(caption)+'</th>'+''.join('<td>'+esc(p['latency_ms'][name].get(pct))+'</td>' for p in points)+'</tr>'
     warnings = ''.join(f'<details><summary>Job {p["job_id"]} · point {p["point_index"]}: {len(p["warnings"])} findings</summary><ul>'+''.join('<li>'+esc(w)+'</li>' for w in p['warnings'])+'</ul></details>' for p in points)
-    cards = ''.join(metadata_card(label, value) for label,value in [
-        ('Model and precision',dict(profile, checkpoint=c['quantization'])),('Workload — synthetic text, single turn',c['workload']),('System under test',c['system']),('Software and backend',c['software'])])
+    system, software = c['system'], c['software']
+    cpu = system.get('cpu') or {}
+    hardware = facts([('System shape', labels['shape']), ('Processor', cpu.get('model name') or system.get('processor')),
+                      ('OCPUs', system.get('ocpus')), ('Exposed vCPUs', system.get('exposed_vcpus')),
+                      ('Memory (GiB)', system.get('memory_gb')), ('Operating system', system.get('os'))])
+    runtime_facts = facts([('GuideLLM', software.get('guidellm_version')), ('vLLM', software.get('vllm_version')),
+                           ('Torch', software.get('torch_version')), ('Inference backend', software.get('backend')),
+                           ('Dtype', profile.get('dtype')), ('Precision / quantization', labels['precision']),
+                           ('Max sequences', profile.get('max_num_seqs')), ('Model length', profile.get('max_model_len')),
+                           ('KV cache (GiB)', 'Automatic' if profile.get('cpu_kvcache_space_gib') is None else profile['cpu_kvcache_space_gib']),
+                           ('CPU memory utilization', profile.get('cpu_memory_utilization')), ('Request timeout (s)', profile.get('request_timeout_seconds'))])
+    cards = f'<article class="card"><h3>Hardware</h3>{hardware}</article><article class="card"><h3>Software and runtime</h3>{runtime_facts}</article>'
+    metadata = ''.join(metadata_card(label, value) for label,value in [
+        ('Model and precision',dict(profile, checkpoint=c['quantization'])),('Workload — synthetic text, single turn',c['workload']),
+        ('Recorded hardware metadata',system),('Recorded software metadata',software)])
     attempt_controls = ''.join(f'<label><input type="checkbox" data-attempt="{jid}" checked> Job {jid}</label> ' for jid in group['attempts'])
     evidence_links = ' · '.join(f'<a href="evidence/job-{jid}.json">Job {jid} evidence</a>' for jid in group['attempts'])
     attempts = attempt_summaries(group)
@@ -440,11 +506,13 @@ def render_detail(group, title):
                         ('Timing checks', f"{sum(p['full_run_status']=='reconciled' for p in attempt['points'])}/{len(attempt['points'])} full-run points reconciled; {sum(p['native_timing_status']=='inconsistent' for p in attempt['points'])} native window inconsistencies")])
         attempt_cards += f'<article class="card attempt-summary" id="job-{jid}"><h3>Job {jid} · {badge(attempt["outcome"])}</h3>{counts}<p class="note">Counts across retained load points · <a href="evidence/job-{jid}.json">Sanitized source evidence</a></p></article>'
     overview = facts([('Test profile', labels['workload']), ('Precision / quantization', labels['precision']),
-                      ('Floating-point dtype', profile.get('dtype')), ('Host', labels['shape']),
                       ('Request target per load point', c['workload'].get('max_requests')),
-                      ('Configuration', group['id'])])
-    body = f'''<div class="hero"><div class="eyebrow">{esc(labels['workload'])} · Configuration report</div><h1>{esc(model)}</h1><div class="subtitle">{esc(labels['shape'])} · {esc(labels['precision'])}</div><p class="note">{esc(title)} · {len(group['attempts'])} attempt(s) · {len(points)} load point(s)</p></div><section class="card"><h2>Report details</h2>{overview}</section><div class="callout">GuideLLM measurements. Not an official MLPerf result or certification. Accuracy not measured. Throughput charts use successful output tokens divided by the full observed request window only when retained counts, tokens and timestamps reconcile. Native values remain in the audit table with their timing status. TPS / concurrency is a diagnostic ratio, not a measured per-request percentile.</div><section class="section"><h2>Performance curves</h2><div class="attempt-controls">{attempt_controls}</div><p class="note">Toggle attempts to inspect overlapping points. Green: complete; amber: incomplete; red: failed. Completion does not validate performance evidence.</p><div class="grid">{charts}</div></section><section class="section"><h2>Workload attempts</h2><div class="grid">{attempt_cards}</div></section><section class="section"><h2>System and benchmark configuration</h2><p class="note">Serving fields record the saved execution configuration; cache flags do not independently establish effective runtime defaults. Different configurations remain separate reports.</p><div class="grid">{cards}</div></section><section class="card"><h2>Run data</h2><p class="note">{esc(table_identity)}</p><div class="scroll" tabindex="0" role="region" aria-label="Run data table"><table class="run-table"><caption>Each column is one retained load point. Missing measurements are not inferred; retries remain separate.</caption><thead>{head}</thead><tbody>{rows}</tbody></table></div></section><section class="card"><h2>Evidence findings and source files</h2><p>{evidence_links}</p><div class="links"><a href="metrics.csv">Combined metrics CSV</a><a href="report.json">Presentation data JSON</a><a href="manifest.json">Source and file hashes</a></div>{warnings}</section><section class="card definitions"><h2>Measurement definitions and review notes</h2><p>Full-run output tokens/s is actual successful output tokens divided by latest request end minus earliest request start across successful, errored and incomplete requests. It includes fill, drain and scheduling gaps, and does not establish steady-state capacity or latency-qualified goodput. Incomplete or sampled evidence withholds this rate. GuideLLM native rates are preserved, even when inconsistent, for audit and are not used in throughput charts. Tokens/s per concurrency is aggregate full-run output TPS divided by configured concurrency; it is not an individual request percentile. TTFT and TPOT use native milliseconds; query latency is converted from seconds to milliseconds. GuideLLM TPOT semantics are retained. Missing values are not inferred. Retried attempts remain separate columns. Findings identify missing evidence and detected inconsistencies; timing consistency does not certify model accuracy or kernel execution.</p><p>Complete means the source job succeeded and every retained load point reached its request target with reconciled counts and no errors or incomplete requests. Request counts on attempt cards sum retained points. No joint latency SLO goodput, accuracy, model quality or production cost was measured. Unequal host, cache, batching or workload settings prevent a controlled host-only or precision-only ranking.</p><p>AMX capability, ZenDNN installation and backend selection do not prove kernel execution. Unknown host resources and model revisions remain unverified.</p></section>'''
-    script = '''<script>document.querySelectorAll('[data-attempt]').forEach(input=>input.addEventListener('change',()=>{document.querySelectorAll('circle[data-job]').forEach(point=>{if(point.dataset.job===input.dataset.attempt)point.style.display=input.checked?'':'none'});document.querySelectorAll('.chart-readout').forEach(p=>p.textContent='Hover or focus a point for measurements.')}));document.querySelectorAll('circle[data-job]').forEach(point=>{const show=()=>point.closest('.chart').querySelector('.chart-readout').textContent=point.getAttribute('aria-label');point.addEventListener('mouseenter',show);point.addEventListener('focus',show)});</script>'''
+                      ('Duration limit (seconds)', c['workload'].get('max_duration_seconds')),
+                      ('Error-stop guard', ('No error stop' if c['workload']['max_errors'] is None else c['workload']['max_errors']) if 'max_errors' in c['workload'] else None),
+                      ('Streams', ', '.join(fmt(v) for v in dict.fromkeys(p['concurrency'] for p in points if p['concurrency'] is not None)) or None),
+                      ('Configuration', group['id']), ('Run date (UTC)', ', '.join(dict.fromkeys(a['date'] for a in attempts)))])
+    body = f'''<div class="hero"><div class="eyebrow">{esc(labels['workload'])} · {badge(attempts[0]['outcome']) if len(attempts)==1 else 'Multiple attempts'}</div><h1>{esc(model)}</h1><div class="subtitle">{esc(labels['shape'])} · {esc(c['system'].get('memory_gb'))} GiB · {esc(labels['precision'])}</div><p class="note">{esc(title)} · {len(group['attempts'])} attempt(s) · {len(points)} load point(s)</p></div><section class="card"><h2>Report details</h2>{overview}</section><div class="callout">GuideLLM measurements. Not an official MLPerf result or certification. Accuracy not measured. Throughput charts use successful output tokens divided by the full observed request window only when retained counts, tokens and timestamps reconcile. Native values remain in the audit table with their timing status. TPS / concurrency is a diagnostic ratio, not a measured per-request percentile.</div><section class="section"><h2>Performance curves</h2><div class="attempt-controls">{attempt_controls}</div><p class="note">Toggle attempts to inspect overlapping points. Green: complete; amber: incomplete; red: failed. Completion does not validate performance evidence.</p><div class="grid">{charts}</div></section><section class="section"><h2>System under test</h2><p class="note">Serving fields record the saved execution configuration; cache flags do not independently establish effective runtime defaults. Different configurations remain separate reports.</p><div class="grid">{cards}</div><details class="configuration-details"><summary>Full model, workload and runtime configuration</summary><div class="grid">{metadata}</div></details></section><section class="card"><h2>Run data</h2><p class="note">{esc(table_identity)}</p><nav class="metric-jumps" aria-label="Metric sections"><a href="#throughput">Throughput</a><a href="#ttft">TTFT</a><a href="#tpot">TPOT</a><a href="#latency">Query latency</a></nav><div class="scroll" tabindex="0" role="region" aria-label="Run data table"><table class="run-table"><caption>Each column is one retained load point. Missing measurements are not inferred; retries remain separate.</caption><thead>{head}</thead><tbody>{rows}</tbody></table></div></section><section class="card definitions"><h2>Measurement definitions and review notes</h2><p>Full-run output tokens/s is actual successful output tokens divided by latest request end minus earliest request start across successful, errored and incomplete requests. It includes fill, drain and scheduling gaps, and does not establish steady-state capacity or latency-qualified goodput. Incomplete or sampled evidence withholds this rate. GuideLLM native rates are preserved, even when inconsistent, for audit and are not used in throughput charts. Tokens/s per concurrency is aggregate full-run output TPS divided by configured concurrency; it is not an individual request percentile. TTFT and TPOT use native milliseconds; query latency is converted from seconds to milliseconds. GuideLLM TPOT semantics are retained. Missing values are not inferred. Retried attempts remain separate columns. Findings identify missing evidence and detected inconsistencies; timing consistency does not certify model accuracy or kernel execution.</p><p>Complete means the source job succeeded and every retained load point reached its request target with reconciled counts and no errors or incomplete requests. Request counts on attempt cards sum retained points. No joint latency SLO goodput, accuracy, model quality or production cost was measured. Unequal host, cache, batching or workload settings prevent a controlled host-only or precision-only ranking.</p><p>AMX capability, ZenDNN installation and backend selection do not prove kernel execution. Unknown host resources and model revisions remain unverified.</p></section><section class="card"><h2>Source files</h2><p>{evidence_links}</p><div class="links"><a href="metrics.csv">Combined metrics CSV</a><a href="report.json">Presentation data JSON</a><a href="manifest.json">Source and file hashes</a></div><details><summary>Workload attempts and request counts</summary><div class="grid">{attempt_cards}</div></details><details><summary>Evidence findings by load point</summary>{warnings}</details></section>'''
+    script = '''<script>function revealAttempt(){const id=decodeURIComponent(location.hash.slice(1));const target=document.getElementById(id);if(!target)return;let node=target.parentElement;while(node){if(node.tagName==='DETAILS')node.open=true;node=node.parentElement;}target.scrollIntoView();}window.addEventListener('hashchange',revealAttempt);if(location.hash)revealAttempt();document.querySelectorAll('[data-attempt]').forEach(input=>input.addEventListener('change',()=>{document.querySelectorAll('[data-series-job]').forEach(point=>{if(point.dataset.seriesJob===input.dataset.attempt)point.style.display=input.checked?'':'none'});document.querySelectorAll('.chart-readout').forEach(p=>p.textContent='Hover or focus a point for measurements.')}));document.querySelectorAll('circle[data-job]').forEach(point=>{const show=()=>point.closest('.chart').querySelector('.chart-readout').textContent=point.getAttribute('aria-label');point.addEventListener('mouseenter',show);point.addEventListener('focus',show)});</script>'''
 
     return document(model, body, script)
 
@@ -466,7 +534,7 @@ def render_index(report):
         system = group['configuration']['system']
         host = f"{labels['shape']} · {fmt(system.get('ocpus'))} OCPU · {fmt(system.get('memory_gb'))} GiB"
         counts = ''.join(f'<span>{esc(attempt[key])} {label}</span>' for key, label in [('successful_requests','successful'), ('errored_requests','errors'), ('incomplete_requests','incomplete')])
-        cards += f'''<a class="report-link report-card" {attributes} data-search="{esc(canonical(group['configuration']).lower())}" href="{group['id']}.html#job-{attempt['job_id']}"><div class="eyebrow">{esc(labels['workload'])} · {badge(attempt['outcome'])}</div><h3>{esc(labels['model'])}</h3><div class="note">{esc(host)}</div><div class="note">{esc(labels['precision'])} · {esc(attempt['date'])}</div><div class="counts">{counts}</div><p class="note">Job {attempt['job_id']} · {len(attempt['points'])} load point(s) · Configuration {group['id']}</p><span class="badge">{sum(bool(p["warnings"]) for p in attempt["points"])} point(s) with findings</span></a>'''
+        cards += f'''<a class="report-link report-card" {attributes} data-search="{esc(canonical(group['configuration']).lower())}" href="{group['id']}.html{('#job-'+str(attempt['job_id'])) if len(group['attempts'])>1 else ''}"><div class="eyebrow">{esc(labels['workload'])} · {badge(attempt['outcome'])}</div><h3>{esc(labels['model'])}</h3><div class="note">{esc(host)}</div><div class="note">{esc(labels['precision'])} · {esc(attempt['date'])}</div><div class="counts">{counts}</div><p class="note">Job {attempt['job_id']} · {len(attempt['points'])} load point(s) · Configuration {group['id']}</p><span class="badge">{sum(bool(p["warnings"]) for p in attempt["points"])} point(s) with findings</span></a>'''
     body = f'''<div class="hero"><div class="eyebrow">Report #{report['id']} · {len(report['groups'])} configuration(s)</div><h1>{esc(report['title'])}</h1><div class="subtitle">Model, host, precision and test-profile benchmark results</div>{summary}</div><div class="callout">MLCommons-style presentation of GuideLLM results. Not an official MLPerf submission or certification. Completion and evidence validity are assessed separately. Throughput uses reconciled full-run request records; missing or sampled records withhold the rate. Native values are retained for audit. Unequal configurations do not establish a controlled host or precision ranking.</div><div class="filters" role="search" aria-label="Filter benchmark attempts">{filters}<button id="reset" type="button">Reset filters</button></div><p id="filterCount" class="note" role="status" aria-live="polite">{len(records)} of {len(records)} attempts</p><div class="report-grid">{cards}</div><p id="empty" class="card empty" hidden>No attempts match these filters. Reset filters to see all results.</p><section class="card definitions section"><h2>Coverage and preserved evidence</h2><p>Each card represents one workload attempt. Matching configurations share a detail page; retries retain separate columns and chart points. Request counts sum retained load points within an attempt; missing counts remain Not measured. Completed means the configured target was reached without errors or incomplete requests. Accuracy and kernel execution are not established by completion.</p><div class="links"><a href="metrics.csv">Combined measurements (CSV)</a><a href="report.json">All report metadata</a><a href="manifest.json">File hashes and evidence policy</a></div></section>'''
     script = '''<script>(()=>{const query=document.getElementById('filter'),filters=[...document.querySelectorAll('select.filter')],cards=[...document.querySelectorAll('.report-card')];function apply(){let n=0;const q=query.value.trim().toLowerCase();for(const card of cards){card.hidden=!(card.dataset.search.includes(q)&&filters.every(f=>!f.value||card.dataset[f.dataset.key]===f.value));if(!card.hidden)n++}document.getElementById('filterCount').textContent=n+' of '+cards.length+' attempts';document.getElementById('empty').hidden=n!==0}query.addEventListener('input',apply);filters.forEach(f=>f.addEventListener('change',apply));document.getElementById('reset').addEventListener('click',()=>{query.value='';filters.forEach(f=>f.value='');apply()});apply()})();</script>'''
     return document(report['title'], body, script)
