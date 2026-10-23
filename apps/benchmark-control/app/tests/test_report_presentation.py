@@ -88,6 +88,41 @@ class ReportPresentationTests(unittest.TestCase):
         configuration['model'].pop('quantization')
         self.assertIn('unverified', configuration_labels(configuration)['precision'])
 
+    def test_reference_layout_metric_sections_and_rendering_preserve_points(self):
+        import copy
+        group = groups_from_snapshot({'sources': [source(1)]})[0]
+        before = copy.deepcopy(group)
+        page = render_detail(group, 'Presentation only')
+        self.assertEqual(group, before)
+        index = render_index(dict(id=1,title='One attempt',groups=[group]))
+        self.assertIn('href=\"'+group['id']+'.html\"', index)
+        sections = ['Report details', 'Performance curves', 'System under test', 'Run data',
+                    'Measurement definitions and review notes', 'Source files']
+        positions = [page.index('<h2>'+title+'</h2>') for title in sections]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn('<h3>Hardware</h3>', page)
+        self.assertIn('<h3>Software and runtime</h3>', page)
+        for anchor in ('throughput','ttft','tpot','latency'):
+            self.assertIn('id="'+anchor+'"', page)
+        self.assertIn('log₂ scale', page)
+        # The fixture lacks retained timing evidence: connecting lines must not
+        # turn withheld throughput into apparent measurements.
+        self.assertNotIn('System TPS vs. concurrency</h3><svg', page)
+        self.assertIn('Not measured — no usable points.', page)
+
+    def test_chart_guides_do_not_join_retries_or_cross_missing_points(self):
+        from app.reporting import chart
+        def point(job, index, concurrency, value):
+            return dict(job_id=job,point_index=index,concurrency=concurrency,
+                        reconstructed_system_tps=value,outcome='complete',evidence_status='checked')
+        points = [point(1,1,1,5),point(1,2,2,8),point(1,3,4,None),point(1,4,8,12),
+                  point(2,1,1,4),point(2,2,2,7)]
+        page = chart(points,'concurrency','reconstructed_system_tps','Throughput','Concurrency','Tokens/s')
+        self.assertEqual(page.count('<polyline'), 2)
+        self.assertEqual(page.count('<circle'), 5)
+        self.assertEqual(page.count('data-series-job='), 2)
+        self.assertIn('C8', page)
+
     def test_failure_without_metrics_has_no_chart_points_or_zero_counts(self):
         group = groups_from_snapshot({'sources': [source(1, {}, 'failed')]})[0]
         detail = render_detail(group, 'Failure evidence')

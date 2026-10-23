@@ -99,9 +99,32 @@ function sessionStatus(text) {
   $("sessionStatus").textContent = text;
 }
 
+const workspaceSections = {
+  auth: ["Authentication", "Set up cloud access for your workspace."],
+  vm: ["Compute hosts", "Connect the infrastructure behind your next benchmark."],
+  vllm: ["Model runtime", "Configure and manage CPU inference runtimes."],
+  bench: ["Benchmarks", "Turn a workload into a repeatable performance measurement."],
+  queue: ["Job queue", "Monitor execution and inspect every outcome."],
+  generated: ["Reports", "Bring benchmark evidence together for comparison."],
+  report: ["Native exports", "Inspect the original measurements from your benchmark runs."]
+};
 function activateTab(name) {
-  document.querySelectorAll(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === name));
+  const section = workspaceSections[name];
+  if (!section) return;
+  document.querySelectorAll(".tab").forEach((tab) => {
+    const active = tab.dataset.tab === name;
+    tab.classList.toggle("active", active);
+    tab.setAttribute("aria-current", active ? "page" : "false");
+  });
   document.querySelectorAll(".tab-panel").forEach((panel) => panel.classList.toggle("active", panel.id === `tab-${name}`));
+  $("workspaceTitle").textContent = section[0];
+  $("workspaceBreadcrumb").textContent = section[0];
+  $("workspaceDescription").textContent = section[1];
+  document.title = `${section[0]} · CPU Benchmark`;
+  const navigationWasOpen = document.body.classList.contains("navigation-open");
+  document.body.classList.remove("navigation-open");
+  $("navigationToggle").setAttribute("aria-expanded", "false");
+  if (navigationWasOpen) $("workspace-content").focus({preventScroll: true});
   localStorage.setItem("activeWorkflowTab", name);
   if (name === "vllm" && token) refreshRuntimeProcesses(false).catch(() => {});
 }
@@ -150,7 +173,29 @@ function rows(tableId, columns, data, onSelect, isSelected = null) {
       td.innerHTML = value == null ? "" : String(value);
       tr.appendChild(td);
     }
+    tr.onkeydown = (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        tr.click();
+      }
+    };
     table.appendChild(tr);
+  }
+  if (!data.length) {
+    const row = table.insertRow();
+    const cell = row.insertCell();
+    cell.colSpan = columns.length;
+    cell.className = "empty-state";
+    const messages = {
+      authProfileTable: "No saved profiles. Add and validate a cloud profile to get started.",
+      vmTable: "No hosts connected. Create a VM or add an existing host.",
+      vmSetupTable: "Host readiness will appear after SSH validation.",
+      ociInstanceTable: "No provisioned instances in this workspace.",
+      vllmTable: "No runtime profiles yet. Save a model configuration above.",
+      runtimeProcessTable: "No runtime processes found on the selected host.",
+      queueTable: "No jobs yet. Your queued operations will appear here."
+    };
+    cell.textContent = messages[tableId] || "No records to display.";
   }
 }
 
@@ -274,6 +319,7 @@ function fillVllmForm(item) {
   $("maxBatchedTokens").value = item.max_num_batched_tokens ?? "";
   $("maxSeqs").value = item.max_num_seqs;
   $("kvCache").value = item.cpu_kvcache_space_gib ?? "";
+  $("cpuMemoryUtilization").value = item.cpu_memory_utilization ?? "";
   $("reservedCpu").value = item.reserved_cpu;
   $("kernelTracing").checked = !!item.kernel_tracing_enabled;
   $("prefixCache").checked = !!item.prefix_cache_enabled;
@@ -296,6 +342,7 @@ async function refreshVllm() {
     { key: "port", label: "Port" },
     { key: "max_model_len", label: "Max Len" },
     { key: "max_num_seqs", label: "Seqs" },
+    { key: "cpu_memory_utilization", label: "CPU memory", render: (x) => x.cpu_memory_utilization == null ? "vLLM default" : `${Math.round(x.cpu_memory_utilization * 100)}%` },
     { key: "cpu_kvcache_space_gib", label: "KV GiB", render: (x) => x.cpu_kvcache_space_gib == null ? "Auto" : x.cpu_kvcache_space_gib }
   ], data, (item) => { selectedVllm = item.id; fillVllmForm(item); }, (item) => item.id === selectedVllm);
   fillProfileSelect("benchmarkVllmSelect", data.filter(x => !x.kernel_tracing_enabled), currentSelectNumber("benchmarkVllmSelect") || selectedVllm, (x) => `${x.name} | ${x.model_ref} | ${modelPrecisionLabel(x.quantization)} | port ${x.port}`, "No vLLM profiles");
@@ -353,10 +400,10 @@ function renderQueue(data) {
     if (counts[job.status] != null) counts[job.status] += 1;
   }
   $("queueSummary").innerHTML = `
-    <span>Queued: ${counts.queued}</span>
-    <span>Running: ${counts.running}</span>
-    <span>Succeeded: ${counts.succeeded}</span>
-    <span>Failed: ${counts.failed}</span>
+    <span><small>Queued</small><strong>${counts.queued}</strong></span>
+    <span><small>Running</small><strong>${counts.running}</strong></span>
+    <span><small>Succeeded</small><strong>${counts.succeeded}</strong></span>
+    <span><small>Failed</small><strong>${counts.failed}</strong></span>
   `;
   rows("queueTable", [
     { key: "id", label: "ID" },
@@ -1096,6 +1143,7 @@ $("saveVllmBtn").onclick = async () => {
       max_num_batched_tokens: maxBatched ? Number(maxBatched) : null,
       max_num_seqs: Number($("maxSeqs").value),
       cpu_kvcache_space_gib: kvCache ? Number(kvCache) : null,
+      cpu_memory_utilization: $("cpuMemoryUtilization").value.trim() ? Number($("cpuMemoryUtilization").value) : null,
       reserved_cpu: Number($("reservedCpu").value),
       kernel_tracing_enabled: $("kernelTracing").checked,
       prefix_cache_enabled: $("prefixCache").checked,
@@ -1242,3 +1290,32 @@ activateTab(document.getElementById(`tab-${savedTab}`) ? savedTab : "auth");
 ensureLocalSession().catch((e) => toast(e.message));
 setInterval(() => { if (token) refreshJobs().catch(() => {}); }, 5000);
 setInterval(() => { if (token) quickCheckVms().catch(() => {}); }, 30000);
+
+// Workspace controls affect presentation and refresh existing read paths only.
+$("navigationToggle").onclick = () => {
+  const open = document.body.classList.toggle("navigation-open");
+  $("navigationToggle").setAttribute("aria-expanded", String(open));
+};
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    document.body.classList.remove("navigation-open");
+    $("navigationToggle").setAttribute("aria-expanded", "false");
+  }
+});
+$("refreshWorkspaceBtn").onclick = async () => {
+  const button = $("refreshWorkspaceBtn");
+  button.disabled = true;
+  button.setAttribute("aria-busy", "true");
+  try {
+    await refreshAll();
+    if (typeof refreshGeneratedReports === "function") await refreshGeneratedReports();
+    toast("Workspace refreshed");
+  } catch (error) { toast(error.message); }
+  finally { button.disabled = false; button.removeAttribute("aria-busy"); }
+};
+
+$("closeNavigationBtn").onclick = () => {
+  document.body.classList.remove("navigation-open");
+  $("navigationToggle").setAttribute("aria-expanded", "false");
+  $("navigationToggle").focus();
+};

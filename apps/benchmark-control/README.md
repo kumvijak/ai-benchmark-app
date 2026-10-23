@@ -13,6 +13,8 @@ docker compose up --build
 
 Open `http://localhost:18080` unless you set a different `APP_PORT`.
 
+The image builds directly from `python:3.12-slim`; no pre-existing local base image is required. For a standalone build, run `docker build -t ai-benchmark-app:local apps/benchmark-control` from the repository root. The build still accepts `BASE_IMAGE` as an explicit override.
+
 ## What This Version Does
 
 - Registers and logs in multiple users.
@@ -76,7 +78,7 @@ See [docs/vm-provisioning.md](docs/vm-provisioning.md) for lifecycle and cleanup
 - Authentication validation endpoint returns explicit OCI Python SDK auth results.
 - User Profile validation requires an explicit OCI config profile header and uploaded matching private key.
 - Registration, login, VM profile creation, vLLM profile creation, ownership rejection, queued job processing, and failed benchmark report rejection were tested against the running container.
-- Live SSH/vLLM benchmark validation is pending your Ubuntu host details and model name.
+- A real OCI VM lifecycle, vLLM/GuideLLM run, report generation, private Object Storage archive, and matching local/browser/object downloads were validated on 23 October 2026; see [integration smoke evidence](docs/integration-smoke-2026-10-23.md) for the exact scope and limitations.
 
 ## Model precision
 
@@ -133,3 +135,15 @@ See [Reports module](docs/reporting.md) for usage, queue recovery, artifact stor
 Save a separate runtime profile with **Enable kernel tracing (diagnostic only)** checked, restart the runtime with that profile, then use **Capture Kernel Trace**. Select its `trace_runtime` job in **Queue** to download the worker traces, execution log and operator summary. Tracing defaults to off and trace-enabled profiles cannot run performance benchmarks. See [Kernel tracing](docs/kernel-tracing.md) for the capture sequence, evidence interpretation and limits.
 
 Completed reports can be archived automatically to a private OCI Object Storage bucket with verified checksums and expiring download links that work while the app is off. See [private OCI report archive configuration](docs/reporting.md#private-oci-report-archive).
+
+## Integrated workspace UI
+
+The RFP-inspired navy and mint workspace preserves the desktop sidebar and mobile navigation. Runtime and benchmark forms expose kernel tracing and trace concurrency; the job queue includes trace ZIP downloads. Generated report cards show archive status, retry controls when available, local ZIP/CSV/JSON downloads, and independent Object Storage links. Local report downloads remain available when archiving fails. See [kernel tracing](docs/kernel-tracing.md) and [report archiving](docs/reporting.md) for configuration and evidence rules.
+
+## CPU memory budget (0.3.2)
+
+The runtime form exposes **CPU memory utilization** (fraction greater than 0 and at most 1), mapped to vLLM `--gpu-memory-utilization` on CPU. New forms suggest 0.75, leaving headroom for the OS and runtime when KV cache is automatic. Explicit KV cache GiB still controls explicit cache allocation. Leaving the field blank omits the flag and uses the installed vLLM default. Existing profiles migrate with a blank value, preserving their previous launch behavior; select one, enter the desired fraction and save a new profile before starting it. The value is persisted, displayed in the profile table, and retained in runtime/report evidence.
+
+## Reference-style HTML reports (0.3.3)
+
+New report collections use the reviewed campaign report layout: report details, four labelled performance curves, hardware and runtime cards, a concurrency-column run table with highlighted Throughput/TTFT/TPOT/Query latency groups, measurement notes and source files. Concurrency charts use a log2 axis; guide lines connect recorded points within each attempt and break at missing measurements. Existing normalization, full-request-window timing, throughput, latency units, evidence checks, JSON groups and CSV measurements are unchanged. Pipeline version 1.3.0 creates a new report collection when the same jobs are selected, preserving previous downloads and archives.

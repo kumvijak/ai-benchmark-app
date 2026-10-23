@@ -127,6 +127,7 @@ class Worker:
             quantization=row.get('quantization', 'none'),
             model_revision=row.get('model_revision'),
             kernel_tracing_enabled=bool(row.get('kernel_tracing_enabled')),
+            cpu_memory_utilization=row.get('cpu_memory_utilization'),
         )
 
     def _health_check(self, user_id: int, payload: dict[str, Any]) -> dict[str, Any]:

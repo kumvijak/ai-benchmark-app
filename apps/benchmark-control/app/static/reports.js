@@ -47,7 +47,7 @@ function renderGeneratedCatalogue() {
           target.location.href = `/api/generated-reports/${report.id}/files/index.html`;
         } catch(error) { target.close(); throw error; }
       }));
-      for (const [label, filename] of [['Download ZIP', 'report.zip'], ['Download CSV', 'metrics.csv'], ['Download JSON', 'report.json']]) {
+      for (const [label, filename] of [['Download local ZIP', 'report.zip'], ['Download CSV', 'metrics.csv'], ['Download JSON', 'report.json']]) {
         actions.append(reportButton(label, async () => {
           const response = await fetch(`/api/generated-reports/${report.id}/files/${filename}`, {headers:{Authorization:`Bearer ${token}`}});
           if (!response.ok) throw new Error(await response.text());
@@ -59,6 +59,7 @@ function renderGeneratedCatalogue() {
     }
     if (report.status === 'succeeded') {
       const archiveStatus = document.createElement('p');
+      archiveStatus.className = 'archive-status';
       archiveStatus.textContent = `Archive: ${report.archive_status}${report.archive_error ? ' · ' + report.archive_error : ''}`;
       card.append(archiveStatus);
       if (report.archive_status === 'ready') actions.append(reportButton('Create independent ZIP link', async () => {
@@ -68,7 +69,7 @@ function renderGeneratedCatalogue() {
       }));
       if (reportArchiveLinks.has(report.id)) {
         const result = reportArchiveLinks.get(report.id);
-        const panel = document.createElement('div');
+        const panel = document.createElement('div'); panel.className = 'archive-panel';
         const link = document.createElement('a'); link.href = result.url; link.textContent = 'Download archived ZIP';
         link.rel = 'noopener noreferrer'; link.referrerPolicy = 'no-referrer';
         const input = document.createElement('input'); input.type = 'text'; input.readOnly = true; input.value = result.url;

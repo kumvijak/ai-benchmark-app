@@ -29,7 +29,7 @@ secret_box = SecretBox(settings.app_secret)
 worker = Worker(db, secret_box, settings.artifact_dir)
 report_worker = ReportWorker(db, settings.artifact_dir)
 
-app = FastAPI(title="AI Inference Benchmark Control", version="0.3.1")
+app = FastAPI(title="AI Inference Benchmark Control", version="0.3.3")
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
 
@@ -86,6 +86,7 @@ class VllmProfileRequest(BaseModel):
     max_num_batched_tokens: int | None = Field(default=None, ge=1)
     max_num_seqs: int = Field(default=8, ge=1)
     cpu_kvcache_space_gib: int | None = Field(default=8, ge=1)
+    cpu_memory_utilization: float | None = Field(default=None, gt=0, le=1)
     reserved_cpu: int = Field(default=2, ge=0)
     kernel_tracing_enabled: bool = False
     prefix_cache_enabled: bool = False
@@ -482,14 +483,15 @@ def create_vllm_profile(req: VllmProfileRequest, user: dict[str, Any] = Depends(
           owner_user_id, name, model_ref, dtype, max_model_len, max_num_batched_tokens,
           max_num_seqs, cpu_kvcache_space_gib, reserved_cpu, prefix_cache_enabled,
           chunked_prefill_enabled, request_timeout_seconds, port, quantization,
-          model_revision, cpu_kvcache_auto, kernel_tracing_enabled
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          model_revision, cpu_kvcache_auto, kernel_tracing_enabled, cpu_memory_utilization
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             user["id"], req.name, req.model_ref, req.dtype, req.max_model_len, req.max_num_batched_tokens,
             req.max_num_seqs, req.cpu_kvcache_space_gib or 0, req.reserved_cpu,
             int(req.prefix_cache_enabled), int(req.chunked_prefill_enabled), req.request_timeout_seconds, req.port,
             req.quantization, req.model_revision, int(req.cpu_kvcache_space_gib is None), int(req.kernel_tracing_enabled),
+            req.cpu_memory_utilization,
         ),
     )
     db.audit(user["id"], "created", "vllm_profile", int(cur.lastrowid), {"name": req.name, "model_ref": req.model_ref})
@@ -503,7 +505,7 @@ def list_vllm_profiles(user: dict[str, Any] = Depends(current_user)) -> list[dic
         SELECT id, name, model_ref, dtype, max_model_len, max_num_batched_tokens, max_num_seqs,
                CASE WHEN cpu_kvcache_auto=1 THEN NULL ELSE cpu_kvcache_space_gib END AS cpu_kvcache_space_gib,
                reserved_cpu, prefix_cache_enabled, chunked_prefill_enabled,
-               request_timeout_seconds, port, quantization, model_revision, kernel_tracing_enabled
+               request_timeout_seconds, port, quantization, model_revision, kernel_tracing_enabled, cpu_memory_utilization
         FROM vllm_profiles WHERE owner_user_id=? ORDER BY id
         """,
         (user["id"],),
