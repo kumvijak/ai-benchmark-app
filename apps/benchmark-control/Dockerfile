@@ -1,4 +1,4 @@
-ARG APP_BASE=benchmarking_app-api:latest
+ARG APP_BASE=python:3.12-slim
 FROM ${APP_BASE}
 
 ENV PYTHONDONTWRITEBYTECODE=1

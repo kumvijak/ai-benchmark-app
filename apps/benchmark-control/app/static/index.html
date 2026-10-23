@@ -186,6 +186,7 @@ region=us-ashburn-1"></textarea></label>
         <label data-help="Client timeout in seconds for runtime readiness checks and GuideLLM OpenAI HTTP requests.">Request timeout<input id="requestTimeout" type="number" value="30"></label>
         <label class="check" data-help="Enables vLLM prefix caching so repeated prompt prefixes can reuse cached KV state. Keep this explicit because it changes benchmark behavior."><input id="prefixCache" type="checkbox"><span>Prefix cache</span></label>
         <label class="check" data-help="Enables chunked prefill so long prompts can be prefetched in chunks, which may improve scheduling for mixed prompt lengths."><input id="chunkedPrefill" type="checkbox"><span>Chunked prefill</span></label>
+        <label class="check" data-help="Diagnostic mode: enables CPU worker traces and requests ZenDNN execution logs. Restart with this profile, then use Capture Kernel Trace. Performance benchmarks require a normal profile."><input id="kernelTracing" type="checkbox"><span>Enable kernel tracing (diagnostic only)</span></label>
       </div>
       <div class="actions">
         <button id="saveVllmBtn">Save vLLM Profile</button>
@@ -193,6 +194,11 @@ region=us-ashburn-1"></textarea></label>
         <button id="stopRuntimeBtn" class="secondary">Stop Selected Runtime</button>
         <button id="refreshRuntimeBtn" class="secondary">Refresh Runtime Processes</button>
       </div>
+      <div class="actions">
+        <label>Trace concurrency<input id="traceConcurrency" type="number" min="1" max="16" value="1"></label>
+        <button id="captureTraceBtn" class="secondary">Capture Kernel Trace</button>
+      </div>
+      <p>Trace capture uses a short fixed diagnostic prompt and 64 output tokens per request. Enable tracing in a saved profile and restart it first. Select the completed trace job in Queue to download its evidence.</p>
       <div class="table-scroll" role="region" aria-label="vllmTable table" tabindex="0"><table id="vllmTable"></table>
       </div><div class="actions">
         <button id="deleteVllmBtn" class="secondary danger">Delete Selected vLLM Profile</button>
@@ -236,7 +242,7 @@ region=us-ashburn-1"></textarea></label>
         <label data-help="Maximum requests GuideLLM may process per strategy. Keep it as a safety cap when duration is the main run limit.">Max requests per strategy<input id="maxRequests" type="number" value="10"></label>
         <label data-help="Maximum seconds GuideLLM runs each strategy. With multiple fixed concurrencies or a sweep, this applies to each strategy, not the whole job.">Max duration seconds<input id="maxDurationSeconds" type="number" value="600" min="1"></label>
         <label data-help="Stop after this many errored requests. Leave blank to omit the max_errors constraint and continue until the request or duration limit.">Max errors<input id="maxErrors" type="number" value="5" min="1" placeholder="No guard (leave blank)"></label>
-        <label data-help="Pause between GuideLLM strategies so the server can settle before the next load point.">Cooldown seconds<input id="cooldownSeconds" type="number" value="5" min="0"></label>
+        <p class="muted">Full-run timing includes all request lifetimes. Measurement warmup and cooldown are disabled; the duration limit remains a safety cap.</p>
         <label data-help="Static seed for synthetic data generation so repeated runs are comparable.">Seed<input id="benchmarkSeed" type="number" value="42"></label>
         <label data-help="Number of GuideLLM sweep strategies. It includes synchronous baseline, throughput probe, and interpolated rate points.">Sweep size<input id="sweepSize" type="number" value="10" min="3"></label>
         <label data-help="GuideLLM interpolated sweep traffic pattern. constant sends an even rate; poisson adds arrival jitter like real user traffic.">Sweep strategy<select id="sweepStrategyType"><option value="poisson">poisson</option><option value="constant">constant</option></select></label>
@@ -299,6 +305,7 @@ region=us-ashburn-1"></textarea></label>
       <div class="table-scroll" role="region" aria-label="queueTable table" tabindex="0"><table id="queueTable"></table>
       </div><div class="actions">
         <button id="deleteJobBtn" class="secondary danger">Delete Selected Job</button>
+        <button id="downloadTraceBtn" class="secondary" disabled>Download Kernel Trace ZIP</button>
       </div>
       <div class="job-detail">
         <div class="subhead">

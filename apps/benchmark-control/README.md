@@ -13,6 +13,8 @@ docker compose up --build
 
 Open `http://localhost:18080` unless you set a different `APP_PORT`.
 
+The image builds directly from `python:3.12-slim`; no pre-existing local base image is required. For a standalone build, run `docker build -t ai-benchmark-app:local apps/benchmark-control` from the repository root. The build still accepts `BASE_IMAGE` as an explicit override.
+
 ## What This Version Does
 
 - Registers and logs in multiple users.
@@ -76,7 +78,7 @@ See [docs/vm-provisioning.md](docs/vm-provisioning.md) for lifecycle and cleanup
 - Authentication validation endpoint returns explicit OCI Python SDK auth results.
 - User Profile validation requires an explicit OCI config profile header and uploaded matching private key.
 - Registration, login, VM profile creation, vLLM profile creation, ownership rejection, queued job processing, and failed benchmark report rejection were tested against the running container.
-- Live SSH/vLLM benchmark validation is pending your Ubuntu host details and model name.
+- A real OCI VM lifecycle, vLLM/GuideLLM run, report generation, private Object Storage archive, and matching local/browser/object downloads were validated on 23 October 2026; see [integration smoke evidence](docs/integration-smoke-2026-10-23.md) for the exact scope and limitations.
 
 ## Model precision
 
@@ -127,3 +129,13 @@ The **Reports** tab queues MLCommons-style offline report collections with four 
 Docker Compose starts a dedicated `report-worker` service using the shared data volume. Single-process local development defaults to an independent embedded reporting thread. Reports use immutable evidence snapshots and do not require live benchmark VMs. Restart existing inference runtimes after upgrading before running new benchmarks: serving-model/precision matching is now required.
 
 See [Reports module](docs/reporting.md) for usage, queue recovery, artifact storage, API endpoints and measurement limitations. Native timing is not independently validated by this first version; reconstructed throughput is withheld.
+
+## Kernel tracing (0.3.1)
+
+Save a separate runtime profile with **Enable kernel tracing (diagnostic only)** checked, restart the runtime with that profile, then use **Capture Kernel Trace**. Select its `trace_runtime` job in **Queue** to download the worker traces, execution log and operator summary. Tracing defaults to off and trace-enabled profiles cannot run performance benchmarks. See [Kernel tracing](docs/kernel-tracing.md) for the capture sequence, evidence interpretation and limits.
+
+Completed reports can be archived automatically to a private OCI Object Storage bucket with verified checksums and expiring download links that work while the app is off. See [private OCI report archive configuration](docs/reporting.md#private-oci-report-archive).
+
+## Integrated workspace UI
+
+The RFP-inspired navy and mint workspace preserves the desktop sidebar and mobile navigation. Runtime and benchmark forms expose kernel tracing and trace concurrency; the job queue includes trace ZIP downloads. Generated report cards show archive status, retry controls when available, local ZIP/CSV/JSON downloads, and independent Object Storage links. Local report downloads remain available when archiving fails. See [kernel tracing](docs/kernel-tracing.md) and [report archiving](docs/reporting.md) for configuration and evidence rules.

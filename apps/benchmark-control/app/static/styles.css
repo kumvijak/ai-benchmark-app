@@ -1173,3 +1173,11 @@ select[multiple] option {
   .navigation-open .workspace-shell { margin-left:0; width:auto; overflow:visible; }
   .sidebar-close { display:flex; position:absolute; top:6px; right:6px; min-height:28px; width:28px; padding:3px; font-size:18px; }
 }
+
+/* Diagnostics and archive controls share the workspace visual system. */
+.actions label { min-width:140px; max-width:210px; flex:0 1 180px; }
+.archive-panel { margin:18px 0; padding:16px; border:1px solid #34544a; border-radius:8px; background:#132a25; }
+.archive-panel a { display:inline-block; margin-bottom:12px; }
+.archive-panel input { margin-bottom:12px; }
+.archive-status { color:#a3d8c8; font-size:11px; }
+.muted { color:var(--muted); font-size:11px; line-height:1.65; }

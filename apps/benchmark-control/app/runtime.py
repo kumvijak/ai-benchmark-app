@@ -89,7 +89,7 @@ def verify_runtime():
         amx_eligible=amx_eligible, amx_runtime_supported=amx_runtime_supported,
         amx_policy='library_auto_dispatch',
         environment={key: os.environ.get(key) for key in ('VLLM_TARGET_DEVICE',
-            'VLLM_CPU_SGL_KERNEL', 'TORCHINDUCTOR_FREEZING', 'VLLM_USE_AOT_COMPILE', 'TORCHINDUCTOR_AUTOGRAD_CACHE')})
+            'VLLM_CPU_SGL_KERNEL', 'ZENDNNL_ENABLE_PROFILER', 'ZENDNNL_API_LOG_LEVEL', 'TORCHINDUCTOR_FREEZING', 'VLLM_USE_AOT_COMPILE', 'TORCHINDUCTOR_AUTOGRAD_CACHE')})
 
 if __name__ == '__main__':
     print(json.dumps(verify_runtime()))
