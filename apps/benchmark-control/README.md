@@ -139,3 +139,7 @@ Completed reports can be archived automatically to a private OCI Object Storage 
 ## Integrated workspace UI
 
 The RFP-inspired navy and mint workspace preserves the desktop sidebar and mobile navigation. Runtime and benchmark forms expose kernel tracing and trace concurrency; the job queue includes trace ZIP downloads. Generated report cards show archive status, retry controls when available, local ZIP/CSV/JSON downloads, and independent Object Storage links. Local report downloads remain available when archiving fails. See [kernel tracing](docs/kernel-tracing.md) and [report archiving](docs/reporting.md) for configuration and evidence rules.
+
+## CPU memory budget (0.3.2)
+
+The runtime form exposes **CPU memory utilization** (fraction greater than 0 and at most 1), mapped to vLLM `--gpu-memory-utilization` on CPU. New forms suggest 0.75, leaving headroom for the OS and runtime when KV cache is automatic. Explicit KV cache GiB still controls explicit cache allocation. Leaving the field blank omits the flag and uses the installed vLLM default. Existing profiles migrate with a blank value, preserving their previous launch behavior; select one, enter the desired fraction and save a new profile before starting it. The value is persisted, displayed in the profile table, and retained in runtime/report evidence.

@@ -24,6 +24,7 @@ class VllmProfile:
     quantization: str = 'none'
     model_revision: str | None = None
     kernel_tracing_enabled: bool = False
+    cpu_memory_utilization: float | None = None
 
 
 def build_vllm_command(profile: VllmProfile, checkpoint_path: str | None = None, launch_script: str | None = None) -> str:
@@ -46,6 +47,10 @@ def build_vllm_command(profile: VllmProfile, checkpoint_path: str | None = None,
         "--port",
         str(profile.port),
     ]
+    if profile.cpu_memory_utilization is not None:
+        if not 0 < profile.cpu_memory_utilization <= 1:
+            raise ValueError("CPU memory utilization must be greater than 0 and at most 1")
+        args.extend(["--gpu-memory-utilization", str(profile.cpu_memory_utilization)])
     if profile.kernel_tracing_enabled:
         from .tracing import trace_dir
         args.extend(['--profiler-config', json.dumps(dict(profiler='torch', torch_profiler_dir=trace_dir(profile.port),

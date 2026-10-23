@@ -372,6 +372,7 @@ def facts(values):
 def metadata_card(title, values):
     labels = {'model_ref':'Model', 'model_revision':'Source revision', 'quantization':'Weight quantization',
               'dtype':'Floating-point dtype', 'cpu_kvcache_space_gib':'KV cache (GiB)',
+              'cpu_memory_utilization':'CPU memory utilization',
               'max_model_len':'Maximum context tokens', 'max_num_seqs':'Maximum sequences',
               'ocpus':'OCPUs', 'exposed_vcpus':'Exposed vCPUs', 'memory_gb':'Memory (GiB)',
               'input_tokens':'Input token budget', 'output_tokens':'Output token budget',

@@ -319,6 +319,7 @@ function fillVllmForm(item) {
   $("maxBatchedTokens").value = item.max_num_batched_tokens ?? "";
   $("maxSeqs").value = item.max_num_seqs;
   $("kvCache").value = item.cpu_kvcache_space_gib ?? "";
+  $("cpuMemoryUtilization").value = item.cpu_memory_utilization ?? "";
   $("reservedCpu").value = item.reserved_cpu;
   $("kernelTracing").checked = !!item.kernel_tracing_enabled;
   $("prefixCache").checked = !!item.prefix_cache_enabled;
@@ -341,6 +342,7 @@ async function refreshVllm() {
     { key: "port", label: "Port" },
     { key: "max_model_len", label: "Max Len" },
     { key: "max_num_seqs", label: "Seqs" },
+    { key: "cpu_memory_utilization", label: "CPU memory", render: (x) => x.cpu_memory_utilization == null ? "vLLM default" : `${Math.round(x.cpu_memory_utilization * 100)}%` },
     { key: "cpu_kvcache_space_gib", label: "KV GiB", render: (x) => x.cpu_kvcache_space_gib == null ? "Auto" : x.cpu_kvcache_space_gib }
   ], data, (item) => { selectedVllm = item.id; fillVllmForm(item); }, (item) => item.id === selectedVllm);
   fillProfileSelect("benchmarkVllmSelect", data.filter(x => !x.kernel_tracing_enabled), currentSelectNumber("benchmarkVllmSelect") || selectedVllm, (x) => `${x.name} | ${x.model_ref} | ${modelPrecisionLabel(x.quantization)} | port ${x.port}`, "No vLLM profiles");
@@ -1141,6 +1143,7 @@ $("saveVllmBtn").onclick = async () => {
       max_num_batched_tokens: maxBatched ? Number(maxBatched) : null,
       max_num_seqs: Number($("maxSeqs").value),
       cpu_kvcache_space_gib: kvCache ? Number(kvCache) : null,
+      cpu_memory_utilization: $("cpuMemoryUtilization").value.trim() ? Number($("cpuMemoryUtilization").value) : null,
       reserved_cpu: Number($("reservedCpu").value),
       kernel_tracing_enabled: $("kernelTracing").checked,
       prefix_cache_enabled: $("prefixCache").checked,
