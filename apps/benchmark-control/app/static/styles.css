@@ -939,6 +939,9 @@ select[multiple],select.compact-multi {
   min-height:100px;
   padding:5px
 }
+#concurrency {
+  height:220px
+}
 select[multiple] option {
   padding:4px 8px;
   border-radius:4px

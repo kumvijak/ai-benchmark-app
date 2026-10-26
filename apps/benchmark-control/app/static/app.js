@@ -24,54 +24,50 @@ let authFormDirty = false;
 
 const $ = (id) => document.getElementById(id);
 
+const concurrencyOptions = [1, 2, 4, 8, 16, 32, 64];
+const defaultConcurrencies = [1, 2, 4, 8, 16];
+
 const workloadProfiles = {
   Smoke: {
     input: 128,
     output: 64,
     requests: 10,
-    concurrencies: [1],
     detail: "Endpoint health check. Small synchronous baseline before longer benchmark runs."
   },
   Chat: {
     input: 256,
     output: 128,
     requests: 64,
-    concurrencies: [1, 2, 4, 8, 16],
     detail: "Light chat profile for TTFT and short decode behavior."
   },
   "Q&A": {
     input: 512,
     output: 128,
     requests: 64,
-    concurrencies: [1, 2, 4, 8],
     detail: "Practical CPU serving profile for common question-answer workloads."
   },
   "Text generation": {
     input: 128,
     output: 1024,
     requests: 64,
-    concurrencies: [1, 2, 4],
     detail: "Decode-heavy profile to expose inter-token latency and sustained generation throughput."
   },
   "Document summary": {
     input: 4096,
     output: 512,
     requests: 64,
-    concurrencies: [1, 2, 4],
     detail: "Prefill-heavy summary profile to stress prompt processing and TTFT."
   },
   "Agent planning": {
     input: 2048,
     output: 1536,
     requests: 64,
-    concurrencies: [1, 2, 4, 8],
     detail: "Mixed prefill and decode workload for agent planning style tasks."
   },
   Custom: {
     input: 128,
     output: 128,
     requests: 10,
-    concurrencies: [1, 2, 4, 8],
     detail: "Custom workload. Edit input tokens, output tokens, requests, and concurrency."
   }
 };
@@ -650,23 +646,15 @@ function applyWorkloadPreset() {
   $("inputTokens").value = profile.input;
   $("outputTokens").value = profile.output;
   $("maxRequests").value = profile.requests;
-  $("workloadDetails").value = `${profile.detail}\nRecommended streams: ${profile.concurrencies.join(", ")}`;
+  $("workloadDetails").value = `${profile.detail}\nDefault streams: ${defaultConcurrencies.join(", ")}. Optional: 32, 64.`;
   const concurrency = $("concurrency");
   concurrency.innerHTML = "";
-  for (const value of profile.concurrencies) {
+  for (const value of concurrencyOptions) {
     const option = document.createElement("option");
     option.value = String(value);
     option.textContent = String(value);
-    option.selected = true;
+    option.selected = defaultConcurrencies.includes(value);
     concurrency.appendChild(option);
-  }
-  if (name === "Custom") {
-    for (const value of [16, 32]) {
-      const option = document.createElement("option");
-      option.value = String(value);
-      option.textContent = String(value);
-      concurrency.appendChild(option);
-    }
   }
 }
 

@@ -62,7 +62,7 @@ The VM, vLLM, and benchmark pages use explicit dropdowns for their targets. A hi
 
 The vLLM tab has a VM selector, saved runtime profile table, and live process table. `Start Runtime` enqueues a runtime-start job for the selected VM/profile pair. `Stop Selected Runtime` enqueues a stop job for the selected process discovered on that VM.
 
-The Benchmarking tab has separate VM and vLLM profile dropdowns. Workload presets populate input tokens, output tokens, requests, and recommended concurrency values. Fixed concurrency mode maps those values to a GuideLLM `concurrent` profile with `streams=[...]`. Sweep mode maps the largest selected concurrency to GuideLLM `sweep.max_concurrency` and uses a Poisson or constant sweep strategy to identify the safe operating range.
+The Benchmarking tab has separate VM and vLLM profile dropdowns. Workload presets populate input tokens, output tokens and requests. Every workload, including Smoke and Custom, offers concurrency choices of 1, 2, 4, 8, 16, 32 and 64; 1, 2, 4, 8 and 16 are selected by default. Fixed concurrency mode maps those values to a GuideLLM `concurrent` profile with `streams=[...]`. Sweep mode maps the largest selected concurrency to GuideLLM `sweep.max_concurrency` and uses a Poisson or constant sweep strategy to identify the safe operating range.
 
 The Report tab renders successful benchmark jobs as a normalized table built from GuideLLM output. CSV, JSON, and HTML downloads are GuideLLM-generated artifacts; Markdown is a compact app rendering of the normalized GuideLLM rows for copying.
 
@@ -136,7 +136,6 @@ Save a separate runtime profile with **Enable kernel tracing (diagnostic only)**
 
 Completed reports can be archived automatically to a private OCI Object Storage bucket with verified checksums and expiring download links that work while the app is off. See [private OCI report archive configuration](docs/reporting.md#private-oci-report-archive).
 
-<<<<<<< Updated upstream
 ## Integrated workspace UI
 
 The RFP-inspired navy and mint workspace preserves the desktop sidebar and mobile navigation. Runtime and benchmark forms expose kernel tracing and trace concurrency; the job queue includes trace ZIP downloads. Generated report cards show archive status, retry controls when available, local ZIP/CSV/JSON downloads, and independent Object Storage links. Local report downloads remain available when archiving fails. See [kernel tracing](docs/kernel-tracing.md) and [report archiving](docs/reporting.md) for configuration and evidence rules.
@@ -148,7 +147,7 @@ The runtime form exposes **CPU memory utilization** (fraction greater than 0 and
 ## Reference-style HTML reports (0.3.3)
 
 New report collections use the reviewed campaign report layout: report details, four labelled performance curves, hardware and runtime cards, a concurrency-column run table with highlighted Throughput/TTFT/TPOT/Query latency groups, measurement notes and source files. Concurrency charts use a log2 axis; guide lines connect recorded points within each attempt and break at missing measurements. Existing normalization, full-request-window timing, throughput, latency units, evidence checks, JSON groups and CSV measurements are unchanged. Pipeline version 1.3.0 creates a new report collection when the same jobs are selected, preserving previous downloads and archives.
-=======
+
 ### Hugging Face tokens for gated models
 
 In **vLLM Configuration**, enter an optional **Hugging Face token** when creating
@@ -184,4 +183,3 @@ API: optional write-only `hf_token` on `POST /api/vllm-profiles`, and owner-only
 `{"hf_token":null}` to clear. Listing returns only `hf_token_configured`.
 
 Reference: [Hugging Face environment variables](https://huggingface.co/docs/huggingface_hub/package_reference/environment_variables).
->>>>>>> Stashed changes

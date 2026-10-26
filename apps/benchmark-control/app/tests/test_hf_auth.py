@@ -81,6 +81,18 @@ class HfAuthTests(unittest.TestCase):
         self.assertIsNone(self.db.one('SELECT encrypted_hf_token FROM vllm_profiles WHERE id=?',(pid,))['encrypted_hf_token'])
         self.assertNotIn(TOKEN,json.dumps(self.db.all('SELECT * FROM audit_events')))
 
+    def test_cpu_memory_budget_and_hf_token_are_saved_together(self):
+        pid = self.profile(hf_token=TOKEN, cpu_memory_utilization=0.75)
+        row = self.db.one('SELECT cpu_memory_utilization,encrypted_hf_token FROM vllm_profiles WHERE id=?', (pid,))
+        self.assertEqual(row['cpu_memory_utilization'], 0.75)
+        self.assertEqual(self.box.decrypt(row['encrypted_hf_token']), TOKEN)
+        response = self.client.get('/api/vllm-profiles', headers=self.headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        saved = next(item for item in response.json() if item['id'] == pid)
+        self.assertEqual(saved['cpu_memory_utilization'], 0.75)
+        self.assertTrue(saved['hf_token_configured'])
+        self.assertNotIn(TOKEN, response.text)
+
     def test_credential_update_requires_ownership_and_does_not_echo_validation_input(self):
         pid=self.profile()
         route=f'/api/vllm-profiles/{pid}/hf-token'

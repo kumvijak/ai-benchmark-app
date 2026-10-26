@@ -494,23 +494,16 @@ def create_vllm_profile(req: VllmProfileRequest, user: dict[str, Any] = Depends(
           owner_user_id, name, model_ref, dtype, max_model_len, max_num_batched_tokens,
           max_num_seqs, cpu_kvcache_space_gib, reserved_cpu, prefix_cache_enabled,
           chunked_prefill_enabled, request_timeout_seconds, port, quantization,
-<<<<<<< Updated upstream
-          model_revision, cpu_kvcache_auto, kernel_tracing_enabled, cpu_memory_utilization
-=======
-          model_revision, cpu_kvcache_auto, kernel_tracing_enabled, encrypted_hf_token
->>>>>>> Stashed changes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          model_revision, cpu_kvcache_auto, kernel_tracing_enabled, cpu_memory_utilization, encrypted_hf_token
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             user["id"], req.name, req.model_ref, req.dtype, req.max_model_len, req.max_num_batched_tokens,
             req.max_num_seqs, req.cpu_kvcache_space_gib or 0, req.reserved_cpu,
             int(req.prefix_cache_enabled), int(req.chunked_prefill_enabled), req.request_timeout_seconds, req.port,
             req.quantization, req.model_revision, int(req.cpu_kvcache_space_gib is None), int(req.kernel_tracing_enabled),
-<<<<<<< Updated upstream
             req.cpu_memory_utilization,
-=======
             secret_box.encrypt(req.hf_token.get_secret_value().strip() if req.hf_token else None),
->>>>>>> Stashed changes
         ),
     )
     db.audit(user["id"], "created", "vllm_profile", int(cur.lastrowid), {"name": req.name, "model_ref": req.model_ref})
@@ -524,12 +517,8 @@ def list_vllm_profiles(user: dict[str, Any] = Depends(current_user)) -> list[dic
         SELECT id, name, model_ref, dtype, max_model_len, max_num_batched_tokens, max_num_seqs,
                CASE WHEN cpu_kvcache_auto=1 THEN NULL ELSE cpu_kvcache_space_gib END AS cpu_kvcache_space_gib,
                reserved_cpu, prefix_cache_enabled, chunked_prefill_enabled,
-<<<<<<< Updated upstream
-               request_timeout_seconds, port, quantization, model_revision, kernel_tracing_enabled, cpu_memory_utilization
-=======
-               request_timeout_seconds, port, quantization, model_revision, kernel_tracing_enabled,
+               request_timeout_seconds, port, quantization, model_revision, kernel_tracing_enabled, cpu_memory_utilization,
                (encrypted_hf_token IS NOT NULL) AS hf_token_configured
->>>>>>> Stashed changes
         FROM vllm_profiles WHERE owner_user_id=? ORDER BY id
         """,
         (user["id"],),

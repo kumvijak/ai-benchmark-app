@@ -428,3 +428,83 @@ Storage archives persist independently; app settings and unarchived files still
 need separate backup. State is retained locally at
 `/private/tmp/aig-oci-smt-hf-20261023-state.json`; the independent app secret is in
 a separate mode-0600 workstation file and was not printed or committed.
+
+## Current workspace deployment — 2026-10-26
+
+- Endpoint: http://158.101.111.13:8080
+- Instance: `aig-benchmark-control-20261026-b6dd372`
+- Instance OCID: `ocid1.computecontainerinstance.oc1.iad.anuwcljsrmrvwliao247yotdvosu3gv5jayapxxcmlwxyctblywuvr74hf5q`
+- Public IP: `158.101.111.13`; private IP: `10.3.200.5`.
+- Immutable image: `us-ashburn-1.ocir.io/idhpsi4njgc8/aig-benchmark-control/private-app@sha256:87df168087976919526032a43965b23159532256b2bea05d24a27eea5a4853a1`
+- Private tag: `workspace-b6dd372-20261026`; app 0.3.3, report pipeline 1.3.0.
+- Source: commit `b6dd372a87d3f749665cd0ee4d429b865157ddd7` plus the local merge-conflict fixes described below.
+- Ashburn, existing compartment/subnet, `CI.Standard.A1.Flex`, 1 OCPU and 4 GiB RAM.
+- API and separate report-worker containers are ACTIVE and use the pinned digest.
+
+Today's committed source contained unresolved merge markers in `app/main.py`
+and README.md. Deployment preparation resolved them while retaining both CPU
+memory utilization and encrypted HF-token storage/listing. A regression test
+verifies these settings can be saved together without exposing the token.
+These fixes remain uncommitted in the workspace. All 110 tests passed inside
+the ARM64 image. Both browser JavaScript assets passed syntax checks. The image
+was built from the repository Dockerfile using `python:3.12-slim`, not a previous
+application image. Test-only httpx was installed only in the disposable test
+container, not in the published image.
+
+Public health returned app version 0.3.3. Public checks passed for the SMT,
+HF-token and CPU memory controls, SMT defaults, empty runtime/instance/report
+catalogues and rejection of report listing without a session. Colocated startup
+checks also validated OCI resource-principal authentication. The report worker
+uploaded an explicitly labelled empty validation report to the private benchmark
+bucket, verified ZIP/CSV/JSON/manifest objects, and verified an independent ZIP
+pre-authenticated download SHA-256. Validation objects are under
+`reports/deployment-validation/20261026-b6dd372/`.
+
+Existing public HTTP/local-session access and resource-principal permissions
+are retained. No existing app, shared network rule or IAM policy was changed.
+No inference VM, runtime setup or benchmark was launched during verification.
+The new app starts with fresh ephemeral data; previous VM connections, profiles,
+jobs and report catalogues were not migrated. Verified Object Storage archives
+persist independently; app settings and unarchived files require separate backup.
+
+Local deployment state: `/private/tmp/aig-20261026-state.json`. Source hashes and
+merge-fix patch are retained separately in `/private/tmp/aig-20261026-source.json`
+and `/private/tmp/aig-20261026-merge-fixes.patch`. The app secret is stored in a
+separate mode-0600 workstation file and was not printed or committed.
+
+## Separate parallel app with concurrency through 64 — 2026-10-26
+
+- Endpoint: http://129.213.41.35:8080
+- Instance: `aig-benchmark-control-20261026-parallel64`
+- Instance OCID: `ocid1.computecontainerinstance.oc1.iad.anuwcljsrmrvwlia2yozmwvtxdnx2bgzzu5gw7dhnxzdxhgc6rvllf6bejaa`
+- Public IP: `129.213.41.35`; private IP: `10.3.200.221`.
+- Immutable image: `us-ashburn-1.ocir.io/idhpsi4njgc8/aig-benchmark-control/private-app@sha256:2d0cb048c2c0ed457f1cd33ca86ab0c86619bb56aa29c68786e1be41f59112c4`
+- Private tag: `parallel-concurrency64-20261026`; app 0.3.3, report pipeline 1.3.0.
+- Source: current workspace, including the earlier merge fixes and new shared
+  concurrency choices/defaults. All seven workload profiles offer 1, 2, 4, 8,
+  16, 32 and 64, with 1, 2, 4, 8 and 16 selected by default.
+- Ashburn, existing compartment/subnet; `CI.Standard.A1.Flex`, 1 OCPU and
+  4 GiB RAM. Both API and report-worker containers are ACTIVE.
+
+The image was built from the repository Dockerfile; all 110 tests passed inside
+it. Public checks verified health, concurrency options/defaults, SMT/HF/CPU memory
+controls, empty profile/instance/report catalogues, and rejection of report access
+without a session. Startup checks validated OCI resource-principal authentication
+and private report archiving: all four objects were read back and verified, and
+the independent ZIP pre-authenticated download matched its SHA-256. Empty validation
+artifacts are under `reports/deployment-validation/20261026-parallel64/`.
+
+This is a new app instance with its own ephemeral database, queue, encryption
+secret and artifact storage. No profiles, jobs or report catalogues were migrated.
+The existing public HTTP/local-session and OCI permission settings are retained.
+No existing instance, shared network rule or IAM policy was modified. Read-only
+checks confirmed the existing app at http://158.101.111.13:8080 is healthy and
+both of its containers remain ACTIVE on their original image digest. No inference
+VM, runtime or benchmark was started or stopped during this deployment.
+
+Local state: `/private/tmp/aig-parallel64-20261026-state.json`. Source hashes are
+in `/private/tmp/aig-parallel64-source.json`. The separate app secret is retained
+in a mode-0600 workstation file and was not printed or committed. Only verified
+Object Storage reports survive loss of ephemeral storage; settings and unarchived
+files need separate backup. Separate control apps still require separate inference
+VMs/runtimes to avoid contention during parallel performance measurements.

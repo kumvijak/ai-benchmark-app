@@ -234,7 +234,7 @@ region=us-ashburn-1"></textarea></label>
       <div class="guidance-panel">
         <div>
           <h3>Fixed concurrency</h3>
-          <p>GuideLLM keeps the selected number of parallel request streams active for each selected concurrency. Use this to compare known workload levels like 1, 2, 4, 8, or 16 streams.</p>
+          <p>GuideLLM keeps the selected number of parallel request streams active for each selected concurrency. Every workload offers 1, 2, 4, 8, 16, 32, and 64 streams; 1 through 16 are selected by default.</p>
         </div>
         <div>
           <h3>Sweep</h3>
@@ -248,7 +248,7 @@ region=us-ashburn-1"></textarea></label>
         <label data-help="Fixed concurrency runs selected stream counts directly. Sweep searches across baseline, peak throughput, and interpolated request rates.">GuideLLM mode<select id="benchmarkMode"><option value="concurrent">Fixed concurrency</option><option value="sweep">Sweep</option></select></label>
         <label data-help="Synthetic prompt size in tokens for each GuideLLM request.">Input tokens<input id="inputTokens" type="number" value="128"></label>
         <label data-help="Synthetic generated-token target for each GuideLLM request.">Output tokens<input id="outputTokens" type="number" value="64"></label>
-        <label data-help="In fixed mode, selected values are the exact GuideLLM concurrent streams. In sweep mode, the largest selected value becomes max_concurrency.">Concurrency / max sweep concurrency<select id="concurrency" class="compact-multi" multiple size="3"></select></label>
+        <label data-help="All workloads offer 1, 2, 4, 8, 16, 32 and 64 streams. Defaults select 1, 2, 4, 8 and 16. In fixed mode, these are the exact concurrent streams. In sweep mode, the largest selected value becomes max_concurrency.">Concurrency / max sweep concurrency<select id="concurrency" class="compact-multi" multiple size="7"></select></label>
         <label data-help="Maximum requests GuideLLM may process per strategy. Keep it as a safety cap when duration is the main run limit.">Max requests per strategy<input id="maxRequests" type="number" value="10"></label>
         <label data-help="Maximum seconds GuideLLM runs each strategy. With multiple fixed concurrencies or a sweep, this applies to each strategy, not the whole job.">Max duration seconds<input id="maxDurationSeconds" type="number" value="600" min="1"></label>
         <label data-help="Stop after this many errored requests. Leave blank to omit the max_errors constraint and continue until the request or duration limit.">Max errors<input id="maxErrors" type="number" value="5" min="1" placeholder="No guard (leave blank)"></label>
