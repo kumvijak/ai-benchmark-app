@@ -158,6 +158,7 @@ class ReportingTests(ReportTestCase):
         profile=VllmProfile('model','bfloat16',4096,None,8,None,2,False,False,30,8000)
         w=Worker(self.db,None);w._vm=lambda *a:None;w._vllm=lambda *a:profile
         w._runtime_evidence=lambda *a:{'serving_config':asdict(profile)}
+        w._hf_environment=lambda *a:''  # This fixture stubs profile lookup; no saved credential.
         raw=fixture(failed=True)['guidellm_json']
         envelope={'returncode':1,'spec':fixture()['spec'],'artifacts':{'json':{'content_b64':base64.b64encode(json.dumps(raw).encode()).decode()}}}
         def check_remote(command, **kwargs):

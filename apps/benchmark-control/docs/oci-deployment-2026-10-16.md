@@ -1,6 +1,6 @@
 # OCI deployment — 2026-10-16
 
-Current endpoint (2026-10-19): **http://129.213.39.17:8080** — report pipeline 1.2.1 with concurrency-only headings, connected to the existing inference VM, HTTP port 8080, original automatic local session, and OCI resource principals enabled. Earlier deployments below are retained as history.
+Current endpoint (2026-10-21): **http://132.145.149.11:8080** — report pipeline 1.2.1 with automatic verified Object Storage archives and independent ZIP links. HTTP port 8080 and original automatic local sessions retained by request. Earlier deployments below are retained as history.
 
 - Endpoint: https://129.213.153.136
 - Region: us-ashburn-1
@@ -293,3 +293,138 @@ restarted or run through VM Setup; no benchmark was launched for verification.
 The previous app at http://158.101.111.62:8080 remains intact. New app storage is
 fresh and ephemeral: prior benchmark jobs and report bundles were not imported.
 No shared network routes, security lists or IAM policies were changed.
+
+## Report archiving deployment — 2026-10-21
+
+- Endpoint: http://132.145.149.11:8080
+- Instance: aig-benchmark-control-20261021-report-archive
+- Instance OCID: `ocid1.computecontainerinstance.oc1.iad.anuwcljsrmrvwliaq5dodiajudtvfnidxbqf26llmqu7ujyuyx3uyi2hwqmq`
+- Public IP: 132.145.149.11; private IP: 10.3.200.205.
+- Image: `us-ashburn-1.ocir.io/idhpsi4njgc8/aig-benchmark-control/private-app@sha256:4754e3a2ef6fea94fc3c3ed9b21285f3ed1180459f074fcac11dedb3045655c8`
+- Private OCIR tag: `report-archive-20261021`.
+- Source commit: `7a199dd`; app version: 0.3.1; report pipeline: 1.2.1.
+- Same Ashburn region, app compartment, subnet and CI.Standard.A1.Flex shape
+  with 1 OCPU and 4 GB memory.
+- Both API and report-worker containers have resource principals enabled.
+- Archive: private, versioned `benchmark` bucket, namespace `idhpsi4njgc8`,
+  region `us-ashburn-1`; default independent link expiry is 168 hours.
+
+The user explicitly requested deploying the current code with report archiving
+only. Security changes and the GuideLLM 0.8.1 upgrade are not included. The
+existing HTTP and automatic local-session access behavior is unchanged.
+Existing IAM policies, shared networking rules and app instances were not changed.
+The prior recorded instance returned OCI 404 NotAuthorizedOrNotFound; this does
+not establish whether it was deleted or is inaccessible to the current principal.
+
+All 91 tests passed inside the ARM64 deployment image. Both containers are ACTIVE.
+Live checks passed for public health, UI assets, archive API route availability,
+owner-authenticated report listing, rejection of unauthenticated report listing,
+and API resource-principal authentication. No inference benchmark was launched.
+
+The report worker's startup validation generated an explicitly labelled empty
+report bundle with no measurements. Using its actual resource principal, it
+uploaded and read back all four archive objects, checked SHA-256, created a
+single-ZIP read-only pre-authenticated request, and downloaded that ZIP without
+app credentials, again checking SHA-256. Validation artifacts remain under
+`reports/deployment-validation/20261021/` in the bucket. A marker in the shared
+volume prevents repeating the check on ordinary worker restarts.
+
+This instance starts with a fresh shared ephemeral database/artifact volume;
+VM connections, runtime profiles, old jobs and the old report catalogue were not
+migrated. Existing report archives in Object Storage are retained. Only verified
+archived reports survive loss of the instance's ephemeral data; app settings and
+unarchived files still require separate backup. As in the previous deployment,
+instance stop/restart/deletion can discard ephemeral app data.
+
+Deployment state is recorded locally in
+`/private/tmp/aig-oci-report-archive-deployment-state.json`. The app encryption
+secret is retained separately in a mode-0600 workstation file and is not committed
+or printed. Keep this secret protected for any later encrypted-profile migration.
+
+## Four parallel-test app instances — 2026-10-22
+
+Four additional independent OCI Container Instances were provisioned in Ashburn
+for parallel testing. The user explicitly approved the existing public HTTP,
+unauthenticated local-session behavior and OCI resource-principal access on all
+four. The previously recorded app instance was not changed or terminated.
+
+| App | Endpoint | Container Instance OCID |
+|---|---|---|
+| 1 | http://129.213.37.93:8080 | `ocid1.computecontainerinstance.oc1.iad.anuwcljsrmrvwliaf6u5xpxwqy4bflkram57df4o7bj5t3r2klg65ntcbc4q` |
+| 2 | http://150.136.96.161:8080 | `ocid1.computecontainerinstance.oc1.iad.anuwcljsrmrvwliakylsvuhvpftr6cgsb2jc4y5zgwobo5in2fz5dnb7k4bq` |
+| 3 | http://129.213.109.99:8080 | `ocid1.computecontainerinstance.oc1.iad.anuwcljsrmrvwliaseuxjpg475idcqlcmbx77haz67ean53cz34irfeps2iq` |
+| 4 | http://129.213.36.223:8080 | `ocid1.computecontainerinstance.oc1.iad.anuwcljsrmrvwlia6ihkurm6jsowf7stfdzuorxezqovknfewwdczrztioda` |
+
+Each instance has 1 OCPU and 4 GB memory and runs an API container plus a
+report-worker container. The four instances therefore add 4 OCPUs and 16 GB
+memory in total. Each has a separate shared ephemeral database/artifact volume,
+independent app secret and queue, and a fresh configuration with no migrated
+VM profiles or jobs. The shared private `benchmark` Object Storage bucket uses
+unique artifact-token paths to keep archived report bundles distinct.
+
+All four run the previously tested image:
+`us-ashburn-1.ocir.io/idhpsi4njgc8/aig-benchmark-control/private-app@sha256:4754e3a2ef6fea94fc3c3ed9b21285f3ed1180459f074fcac11dedb3045655c8`.
+No application code, GuideLLM version, IAM policy or shared network rule was changed.
+
+All eight containers are ACTIVE. Each app passed health, UI asset, archive API,
+authenticated report-listing and unauthenticated report-listing rejection checks.
+The API checks passed from a temporary client-only diagnostic container within
+OCI using both the public and private health endpoints. App 3 also passed the
+workstation checks. Public connections to apps 1, 2 and 4 timed out from the
+workstation VPN, despite passing from OCI; no shared network rule was changed
+to address this client-path limitation. The diagnostic exposed no listening
+service or OCI resource principal and was deleted after collecting results.
+Each API confirmed resource-principal authentication. Each report worker used its
+actual resource principal to upload a clearly labelled empty validation bundle,
+read back and verify all four files, and verify an independent ZIP download's
+SHA-256. These checks generated no benchmark measurements and launched no
+inference benchmark. Validation objects are under
+`reports/deployment-validation/20261022-parallel/`.
+
+Instance state is saved in workstation files
+`/private/tmp/aig-oci-parallel-20261022-{1..4}-state.json`. Independent app secrets
+are stored separately with mode 0600 and were not printed or committed.
+Only verified Object Storage archives survive loss of ephemeral instance data;
+app settings and unarchived files still require separate backup.
+
+For independent performance measurements, use separate inference VMs or isolated
+inference runtimes. Separate control apps do not isolate contention when tests
+share the same inference server.
+
+## SMT selection and HF-token GUI deployment — 2026-10-23
+
+- Endpoint: http://150.136.125.105:8080
+- Instance: `aig-benchmark-control-20261023-smt-hf`
+- Instance OCID: `ocid1.computecontainerinstance.oc1.iad.anuwcljsrmrvwliaonj2whhz2lh3b2epsds6kvtczz3ygwr3kqgzjt2nsnla`
+- Public IP: `150.136.125.105`; private IP: `10.3.200.117`.
+- Immutable image: `us-ashburn-1.ocir.io/idhpsi4njgc8/aig-benchmark-control/private-app@sha256:5d575f4cd5b8c0ef9153d2ad723430deeb407224faa70ef815bbd06188c30452`
+- Private tag: `smt-hf-20261023`; app version 0.3.1, report pipeline 1.2.1.
+- Ashburn, existing app compartment and subnet; `CI.Standard.A1.Flex`,
+  1 OCPU and 4 GiB RAM. API and report-worker containers are both ACTIVE.
+
+The image contains the current workspace application source, including explicit
+SMT selection for newly provisioned benchmark instances and encrypted HF-token
+GUI support. It was built by copying the application into the prior immutable
+report-archive image; package requirements are unchanged. GuideLLM remains 0.8.0.
+All 104 tests passed inside the ARM64 deployment image before publication.
+
+The existing public HTTP and automatic local-session behavior and resource-principal
+permissions are retained. Existing app instances, IAM policies and shared network
+rules were not modified. No inference VM or benchmark was launched during checks.
+SMT changes were verified with simulated OCI responses in tests; no live SMT-off
+benchmark VM was provisioned for deployment verification.
+
+Public endpoint checks passed for health, the SMT/HF controls, SMT defaults,
+empty instance/report catalogues and rejection of report listing without a session.
+The colocated startup verification also passed resource-principal authentication.
+The report worker uploaded an explicitly labelled empty validation report to the
+private `benchmark` bucket, verified all four archive objects, created a read-only
+expiring ZIP download link and verified the independent download SHA-256.
+Validation objects are under `reports/deployment-validation/20261023-smt-hf/`.
+
+This app has fresh ephemeral database/artifact storage. Previous VM connections,
+runtime profiles, jobs and report catalogues were not migrated. Verified Object
+Storage archives persist independently; app settings and unarchived files still
+need separate backup. State is retained locally at
+`/private/tmp/aig-oci-smt-hf-20261023-state.json`; the independent app secret is in
+a separate mode-0600 workstation file and was not printed or committed.

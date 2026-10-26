@@ -8,9 +8,10 @@ from typing import Annotated, Any, Literal
 import urllib.request
 
 from fastapi import Cookie, Request, Depends, FastAPI, Header, HTTPException, Query, Response
-from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, JSONResponse
+from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, SecretStr, model_validator
 
 from .benchmark import normalize_guidellm_result, report_csv, report_html, report_markdown
 from .config import get_settings
@@ -31,6 +32,14 @@ report_worker = ReportWorker(db, settings.artifact_dir)
 
 app = FastAPI(title="AI Inference Benchmark Control", version="0.3.3")
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_without_credentials(request: Request, exc: RequestValidationError):
+    # Model-level validation errors otherwise echo the entire input, including tokens.
+    return JSONResponse(status_code=422, content={'detail':[
+        {key:error[key] for key in ('type','loc','msg') if key in error}
+        for error in exc.errors()
+    ]})
 
 
 class RegisterRequest(BaseModel):
@@ -71,12 +80,14 @@ class OciVmRequest(BaseModel):
     image_id: str
     subnet_id: str
     assign_public_ip: bool = True
+    smt_enabled: bool | None = Field(default=None, strict=True)
     username: str = "ubuntu"
     ssh_public_key: str
     ssh_private_key: str | None = None
 
 
 class VllmProfileRequest(BaseModel):
+    hf_token: SecretStr | None = Field(default=None, max_length=4096)
     name: str
     model_ref: str
     dtype: Literal['bfloat16', 'float32', 'float16', 'auto'] = "bfloat16"
@@ -404,7 +415,7 @@ def create_oci_instance(req: OciVmRequest, user: dict[str, Any] = Depends(curren
     if req.shape not in DOC_APPROVED_SHAPES:
         raise HTTPException(status_code=400, detail="Shape is not approved by the initial benchmark guide")
     job_id = db.create_job(user["id"], "provision_vm", req.model_dump())
-    db.audit(user["id"], "enqueued", "provision_vm", job_id, {"display_name": req.display_name, "shape": req.shape})
+    db.audit(user["id"], "enqueued", "provision_vm", job_id, {"display_name": req.display_name, "shape": req.shape, "smt_enabled": req.smt_enabled})
     return {"job_id": job_id}
 
 
@@ -414,7 +425,7 @@ def list_oci_instances(user: dict[str, Any] = Depends(current_user)) -> list[dic
         """
         SELECT id, vm_profile_id, display_name, compartment_id, availability_domain, subnet_id,
                instance_id, boot_volume_id, shape, ocpus, memory_gb, boot_volume_gb, image_id,
-               assign_public_ip, public_ip, private_ip, lifecycle_state, created_at, destroyed_at
+               assign_public_ip, smt_requested, smt_enabled, public_ip, private_ip, lifecycle_state, created_at, destroyed_at
         FROM oci_compute_instances WHERE owner_user_id=? ORDER BY id DESC
         """,
         (user["id"],),
@@ -483,7 +494,11 @@ def create_vllm_profile(req: VllmProfileRequest, user: dict[str, Any] = Depends(
           owner_user_id, name, model_ref, dtype, max_model_len, max_num_batched_tokens,
           max_num_seqs, cpu_kvcache_space_gib, reserved_cpu, prefix_cache_enabled,
           chunked_prefill_enabled, request_timeout_seconds, port, quantization,
+<<<<<<< Updated upstream
           model_revision, cpu_kvcache_auto, kernel_tracing_enabled, cpu_memory_utilization
+=======
+          model_revision, cpu_kvcache_auto, kernel_tracing_enabled, encrypted_hf_token
+>>>>>>> Stashed changes
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
@@ -491,7 +506,11 @@ def create_vllm_profile(req: VllmProfileRequest, user: dict[str, Any] = Depends(
             req.max_num_seqs, req.cpu_kvcache_space_gib or 0, req.reserved_cpu,
             int(req.prefix_cache_enabled), int(req.chunked_prefill_enabled), req.request_timeout_seconds, req.port,
             req.quantization, req.model_revision, int(req.cpu_kvcache_space_gib is None), int(req.kernel_tracing_enabled),
+<<<<<<< Updated upstream
             req.cpu_memory_utilization,
+=======
+            secret_box.encrypt(req.hf_token.get_secret_value().strip() if req.hf_token else None),
+>>>>>>> Stashed changes
         ),
     )
     db.audit(user["id"], "created", "vllm_profile", int(cur.lastrowid), {"name": req.name, "model_ref": req.model_ref})
@@ -505,11 +524,30 @@ def list_vllm_profiles(user: dict[str, Any] = Depends(current_user)) -> list[dic
         SELECT id, name, model_ref, dtype, max_model_len, max_num_batched_tokens, max_num_seqs,
                CASE WHEN cpu_kvcache_auto=1 THEN NULL ELSE cpu_kvcache_space_gib END AS cpu_kvcache_space_gib,
                reserved_cpu, prefix_cache_enabled, chunked_prefill_enabled,
+<<<<<<< Updated upstream
                request_timeout_seconds, port, quantization, model_revision, kernel_tracing_enabled, cpu_memory_utilization
+=======
+               request_timeout_seconds, port, quantization, model_revision, kernel_tracing_enabled,
+               (encrypted_hf_token IS NOT NULL) AS hf_token_configured
+>>>>>>> Stashed changes
         FROM vllm_profiles WHERE owner_user_id=? ORDER BY id
         """,
         (user["id"],),
     )
+
+
+class HfTokenRequest(BaseModel):
+    hf_token: SecretStr | None = Field(max_length=4096)
+
+
+@app.put("/api/vllm-profiles/{profile_id}/hf-token")
+def save_hf_token(profile_id: int, req: HfTokenRequest, user: dict[str, Any] = Depends(current_user)):
+    _assert_owned('vllm_profiles', profile_id, user['id'])
+    value = req.hf_token.get_secret_value().strip() if req.hf_token else None
+    db.execute('UPDATE vllm_profiles SET encrypted_hf_token=? WHERE id=? AND owner_user_id=?',
+               (secret_box.encrypt(value), profile_id, user['id']))
+    db.audit(user['id'], 'credential_updated', 'vllm_profile', profile_id, {'hf_token_configured':bool(value)})
+    return {'id':profile_id, 'hf_token_configured':bool(value)}
 
 
 @app.delete("/api/vllm-profiles/{profile_id}")

@@ -44,7 +44,7 @@ class SshClient:
             finally:
                 self._key_path = None
 
-    def run(self, command: str, timeout: int = 60) -> tuple[int, str, str]:
+    def run(self, command: str, timeout: int = 60, input_text: str | None = None) -> tuple[int, str, str]:
         if not self._key_path:
             raise RuntimeError("SSH client is not connected")
         remote = f"{self.profile.username}@{self.profile.host}"
@@ -70,7 +70,7 @@ class SshClient:
             command,
         ]
         try:
-            proc = subprocess.run(args, text=True, capture_output=True, timeout=timeout)
+            proc = subprocess.run(args, input=input_text, text=True, capture_output=True, timeout=timeout)
         except subprocess.TimeoutExpired as exc:
             return 124, exc.stdout or "", exc.stderr or f"SSH command timed out after {timeout} seconds"
         return proc.returncode, proc.stdout, proc.stderr

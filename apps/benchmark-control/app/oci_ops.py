@@ -21,6 +21,7 @@ DEFAULT_VM_DEPLOYMENT = {
     "username": "ubuntu",
     "operating_system": "Canonical Ubuntu",
     "operating_system_version": "24.04",
+    "smt_enabled": True,
 }
 
 
@@ -190,3 +191,45 @@ def shape_config_details(shape: str, ocpus: float, memory_gb: float) -> Any | No
         ocpus=ocpus,
         memory_in_gbs=memory_gb,
     )
+
+
+def smt_platform_config(compute: Any, compartment_id: str, availability_domain: str,
+                        image_id: str, shape: str, enabled: bool | None) -> Any | None:
+    """Validate current shape capabilities before creating a billable instance."""
+    if enabled is None:
+        return None  # Preserve OCI defaults for older queued/API requests.
+    if type(enabled) is not bool:
+        raise ValueError("SMT selection must be a boolean")
+    import oci
+
+    shapes = oci.pagination.list_call_get_all_results(
+        compute.list_shapes, compartment_id,
+        availability_domain=availability_domain, image_id=image_id,
+    ).data
+    selected = next((item for item in shapes if item.shape == shape), None)
+    options = getattr(selected, "platform_config_options", None)
+    smt_options = getattr(options, "symmetric_multi_threading_options", None)
+    allowed = getattr(smt_options, "allowed_values", None) or []
+    if not any(value is enabled for value in allowed):
+        raise RuntimeError(f"OCI does not advertise SMT {'enabled' if enabled else 'disabled'} "
+                           f"for {shape} with the selected image and availability domain")
+    model_names = {
+        "AMD_VM": "AmdVmLaunchInstancePlatformConfig",
+        "INTEL_VM": "IntelVmLaunchInstancePlatformConfig",
+        "GENERIC_BM": "GenericBmLaunchInstancePlatformConfig",
+        "AMD_MILAN_BM": "AmdMilanBmLaunchInstancePlatformConfig",
+        "AMD_ROME_BM": "AmdRomeBmLaunchInstancePlatformConfig",
+        "INTEL_ICELAKE_BM": "IntelIcelakeBmLaunchInstancePlatformConfig",
+        "INTEL_SKYLAKE_BM": "IntelSkylakeBmLaunchInstancePlatformConfig",
+    }
+    model_name = model_names.get(getattr(options, "type", None))
+    model = getattr(oci.core.models, model_name, None) if model_name else None
+    if model is None:
+        raise RuntimeError(f"Unsupported OCI platform configuration type for {shape}")
+    return model(is_symmetric_multi_threading_enabled=enabled)
+
+
+def instance_smt_enabled(instance: Any) -> bool | None:
+    value = getattr(getattr(instance, "platform_config", None),
+                    "is_symmetric_multi_threading_enabled", None)
+    return value if type(value) is bool else None

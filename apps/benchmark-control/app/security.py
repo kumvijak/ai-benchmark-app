@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import os
+import re
 import secrets
 from dataclasses import dataclass
 
@@ -60,7 +61,7 @@ def redact(text: str | None) -> str:
     if not text:
         return ""
     needles = ["PRIVATE KEY", "password", "passphrase", "Authorization:", "Bearer "]
-    result = text
+    result = re.sub(r'\bhf_[A-Za-z0-9_]+\b', '[REDACTED]', text)
     for needle in needles:
         result = result.replace(needle, "[REDACTED]")
     return result[-8000:]
