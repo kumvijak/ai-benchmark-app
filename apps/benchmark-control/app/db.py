@@ -86,6 +86,8 @@ CREATE TABLE IF NOT EXISTS oci_compute_instances (
   boot_volume_gb INTEGER NOT NULL,
   image_id TEXT NOT NULL,
   assign_public_ip INTEGER NOT NULL,
+  smt_requested INTEGER,
+  smt_enabled INTEGER,
   public_ip TEXT,
   private_ip TEXT,
   lifecycle_state TEXT NOT NULL DEFAULT 'queued',
@@ -111,6 +113,7 @@ CREATE TABLE IF NOT EXISTS vllm_profiles (
   cpu_memory_utilization REAL,
   quantization TEXT NOT NULL DEFAULT 'none',
   model_revision TEXT,
+  encrypted_hf_token TEXT,
   cpu_kvcache_auto INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(owner_user_id, name)
@@ -168,11 +171,14 @@ class Database:
             }.items():
                 self._ensure_column("report_jobs", column, definition)
             self._ensure_column("vm_setup_status", "benchmark_version", "TEXT")
+            self._ensure_column("oci_compute_instances", "smt_requested", "INTEGER")
+            self._ensure_column("oci_compute_instances", "smt_enabled", "INTEGER")
             self._ensure_column("vm_setup_status", "runtime_evidence", "TEXT NOT NULL DEFAULT '{}'")
             self._ensure_column("vllm_profiles", "kernel_tracing_enabled", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column("vllm_profiles", "cpu_memory_utilization", "REAL")
             self._ensure_column("vllm_profiles", "quantization", "TEXT NOT NULL DEFAULT 'none'")
             self._ensure_column("vllm_profiles", "model_revision", "TEXT")
+            self._ensure_column("vllm_profiles", "encrypted_hf_token", "TEXT")
             self._ensure_column("vllm_profiles", "cpu_kvcache_auto", "INTEGER NOT NULL DEFAULT 0")
 
     def _ensure_column(self, table: str, column: str, definition: str) -> None:

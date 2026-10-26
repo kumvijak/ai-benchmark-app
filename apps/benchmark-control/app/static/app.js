@@ -24,54 +24,50 @@ let authFormDirty = false;
 
 const $ = (id) => document.getElementById(id);
 
+const concurrencyOptions = [1, 2, 4, 8, 16, 32, 64];
+const defaultConcurrencies = [1, 2, 4, 8, 16];
+
 const workloadProfiles = {
   Smoke: {
     input: 128,
     output: 64,
     requests: 10,
-    concurrencies: [1],
     detail: "Endpoint health check. Small synchronous baseline before longer benchmark runs."
   },
   Chat: {
     input: 256,
     output: 128,
     requests: 64,
-    concurrencies: [1, 2, 4, 8, 16],
     detail: "Light chat profile for TTFT and short decode behavior."
   },
   "Q&A": {
     input: 512,
     output: 128,
     requests: 64,
-    concurrencies: [1, 2, 4, 8],
     detail: "Practical CPU serving profile for common question-answer workloads."
   },
   "Text generation": {
     input: 128,
     output: 1024,
     requests: 64,
-    concurrencies: [1, 2, 4],
     detail: "Decode-heavy profile to expose inter-token latency and sustained generation throughput."
   },
   "Document summary": {
     input: 4096,
     output: 512,
     requests: 64,
-    concurrencies: [1, 2, 4],
     detail: "Prefill-heavy summary profile to stress prompt processing and TTFT."
   },
   "Agent planning": {
     input: 2048,
     output: 1536,
     requests: 64,
-    concurrencies: [1, 2, 4, 8],
     detail: "Mixed prefill and decode workload for agent planning style tasks."
   },
   Custom: {
     input: 128,
     output: 128,
     requests: 10,
-    concurrencies: [1, 2, 4, 8],
     detail: "Custom workload. Edit input tokens, output tokens, requests, and concurrency."
   }
 };
@@ -312,6 +308,10 @@ function fillVllmForm(item) {
   $("vllmName").value = item.name;
   $("modelRef").value = item.model_ref;
   $("modelRevision").value = item.model_revision ?? "";
+  $("hfToken").value = "";
+  $("hfTokenStatus").textContent = item.hf_token_configured
+    ? `HF token saved for ${item.name}. Enter a replacement or clear it below. Restart the runtime after changing credentials.`
+    : "No app token configured. Leave blank to use the VM's existing Hugging Face login.";
   $("quantization").value = item.quantization || "none";
   $("dtype").value = item.dtype;
   $("runtimePort").value = item.port;
@@ -331,11 +331,15 @@ function fillVllmForm(item) {
 async function refreshVllm() {
   const data = await api("/api/vllm-profiles");
   vllmProfilesCache = data;
-  if (!selectedVllm && data.length) selectedVllm = data[0].id;
+  if (!selectedVllm && data.length) {
+    selectedVllm = data[0].id;
+    fillVllmForm(data[0]);
+  }
   rows("vllmTable", [
     { key: "id", label: "ID" },
     { key: "name", label: "Name" },
     { key: "model_ref", label: "Model" },
+    { key: "hf_token_configured", label: "HF token", render: (x) => x.hf_token_configured ? "Saved" : "Not set" },
     { key: "quantization", label: "Model precision", render: (x) => modelPrecisionLabel(x.quantization) },
     { key: "dtype", label: "Dtype" },
     { key: "kernel_tracing_enabled", label: "Mode", render: (x) => x.kernel_tracing_enabled ? "Diagnostic tracing" : "Benchmark" },
@@ -577,12 +581,13 @@ async function refreshOciInstances() {
     { key: "id", label: "ID" },
     { key: "display_name", label: "Name" },
     { key: "shape", label: "Shape" },
+    { key: "smt_label", label: "SMT (OCI)" },
     { key: "public_ip", label: "Public IP" },
     { key: "private_ip", label: "Private IP" },
     { key: "lifecycle_state", label: "State" },
     { key: "vm_profile_id", label: "SSH Profile" },
     { key: "destroyed_at", label: "Destroyed" }
-  ], data, (item) => {
+  ], data.map((item) => ({ ...item, smt_label: item.smt_enabled == null ? "Unknown" : (item.smt_enabled ? "Enabled" : "Disabled") })), (item) => {
     selectedOciInstance = item.id;
     if (item.vm_profile_id) {
       selectedVm = item.vm_profile_id;
@@ -641,23 +646,15 @@ function applyWorkloadPreset() {
   $("inputTokens").value = profile.input;
   $("outputTokens").value = profile.output;
   $("maxRequests").value = profile.requests;
-  $("workloadDetails").value = `${profile.detail}\nRecommended streams: ${profile.concurrencies.join(", ")}`;
+  $("workloadDetails").value = `${profile.detail}\nDefault streams: ${defaultConcurrencies.join(", ")}. Optional: 32, 64.`;
   const concurrency = $("concurrency");
   concurrency.innerHTML = "";
-  for (const value of profile.concurrencies) {
+  for (const value of concurrencyOptions) {
     const option = document.createElement("option");
     option.value = String(value);
     option.textContent = String(value);
-    option.selected = true;
+    option.selected = defaultConcurrencies.includes(value);
     concurrency.appendChild(option);
-  }
-  if (name === "Custom") {
-    for (const value of [16, 32]) {
-      const option = document.createElement("option");
-      option.value = String(value);
-      option.textContent = String(value);
-      concurrency.appendChild(option);
-    }
   }
 }
 
@@ -855,6 +852,7 @@ async function loadOciOptions() {
   $("ociShape").value = defaults.default_deployment.shape;
   $("ociOcpus").value = defaults.default_deployment.ocpus;
   $("ociMemory").value = defaults.default_deployment.memory_gb;
+  $("ociSmtEnabled").value = String(defaults.default_deployment.smt_enabled ?? true);
   $("ociBootVolume").value = defaults.default_deployment.boot_volume_gb;
   $("newVmUser").value = defaults.default_deployment.username;
   await Promise.all([loadComputeScopedOptions(), loadNetworkScopedOptions()]);
@@ -1093,6 +1091,7 @@ $("createVmBtn").onclick = async () => {
       shape: $("ociShape").value,
       ocpus: Number($("ociOcpus").value),
       memory_gb: Number($("ociMemory").value),
+      smt_enabled: $("ociSmtEnabled").value === "true",
       boot_volume_gb: Number($("ociBootVolume").value),
       image_id: $("ociImage").value,
       subnet_id: $("ociSubnet").value,
@@ -1128,15 +1127,34 @@ $("destroyVmBtn").onclick = async () => {
   await Promise.all([refreshJobs(), refreshOciInstances()]);
 };
 
+if (location.protocol !== 'https:' && !['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)) {
+  $("hfTokenTransportNotice").hidden = false;
+  $("hfTokenTransportNotice").textContent = 'This connection uses HTTP. Use HTTPS or a trusted tunnel before sending a Hugging Face token.';
+}
+async function updateHfToken(clear) {
+  if (!selectedVllm) return toast('Select a saved vLLM profile first');
+  const value = clear ? null : $("hfToken").value.trim();
+  if (!clear && !value) return toast('Enter a Hugging Face token first');
+  await api(`/api/vllm-profiles/${selectedVllm}/hf-token`, {method:'PUT',body:JSON.stringify({hf_token:value})});
+  $("hfToken").value = '';
+  await refreshVllm();
+  const profile = vllmProfilesCache.find(p => p.id === selectedVllm);
+  if (profile) fillVllmForm(profile);
+  toast(clear ? 'App token cleared. Existing VM copies must be revoked on Hugging Face if needed.' : 'HF token saved. Restart the runtime to apply it.');
+}
+$("saveHfTokenBtn").onclick = () => updateHfToken(false).catch(e => toast(e.message));
+$("clearHfTokenBtn").onclick = () => updateHfToken(true).catch(e => toast(e.message));
+
 $("saveVllmBtn").onclick = async () => {
   const maxBatched = $("maxBatchedTokens").value;
   const kvCache = $("kvCache").value;
-  await api("/api/vllm-profiles", {
+  const savedProfile = await api("/api/vllm-profiles", {
     method: "POST",
     body: JSON.stringify({
       name: $("vllmName").value,
       model_ref: $("modelRef").value,
       model_revision: $("modelRevision").value.trim() || null,
+      hf_token: $("hfToken").value.trim() || null,
       quantization: $("quantization").value,
       dtype: $("dtype").value,
       max_model_len: Number($("maxModelLen").value),
@@ -1152,8 +1170,12 @@ $("saveVllmBtn").onclick = async () => {
       port: Number($("runtimePort").value)
     })
   });
+  $("hfToken").value = "";
   toast("vLLM profile saved");
+  selectedVllm = savedProfile.id;
   await refreshVllm();
+  const profile = vllmProfilesCache.find(p => p.id === selectedVllm);
+  if (profile) fillVllmForm(profile);
 };
 
 $("deleteVllmBtn").onclick = async () => {

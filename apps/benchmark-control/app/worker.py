@@ -11,7 +11,7 @@ from typing import Any
 
 from .benchmark import GuideLLMBenchmarkSpec, normalize_guidellm_result, remote_guidellm_command
 from .db import Database
-from .oci_ops import DOC_APPROVED_SHAPES, context_from_saved_auth, shape_config_details
+from .oci_ops import DOC_APPROVED_SHAPES, context_from_saved_auth, shape_config_details, smt_platform_config, instance_smt_enabled
 from .security import SecretBox, redact
 from .runtime import VLLM_VERSION, TORCH_VERSION, ZENTORCH_VERSION, ZENDNN_VERSION
 from .ssh_client import HEALTH_SCRIPT, VM_SETUP_SCRIPT, SshClient, VmProfile, parse_health, parse_setup, wait_for_http
@@ -219,10 +219,25 @@ class Worker:
             ),
         )
 
+    def _hf_environment(self, ssh: SshClient, user_id: int, profile_id: int) -> str:
+        row = self.db.one('SELECT encrypted_hf_token FROM vllm_profiles WHERE id=? AND owner_user_id=?', (profile_id,user_id))
+        if not row:
+            raise RuntimeError('vLLM profile not found')
+        if not row['encrypted_hf_token']:
+            return ''  # Preserve the VM user's existing HF login for legacy profiles.
+        from .hf_auth import credential_commands
+        command, environment = credential_commands(self.secrets.app_secret, profile_id)
+        value = self.secrets.decrypt(row['encrypted_hf_token'])
+        code, _, _ = ssh.run(command, timeout=60, input_text=value)
+        if code != 0:
+            raise RuntimeError('Could not configure Hugging Face credentials on the VM')
+        return environment
+
     def _start_runtime(self, user_id: int, payload: dict[str, Any]) -> dict[str, Any]:
         vm = self._vm(user_id, int(payload["vm_profile_id"]))
         profile = self._vllm(user_id, int(payload["vllm_profile_id"]))
         with SshClient(vm) as ssh:
+            hf_environment = self._hf_environment(ssh, user_id, int(payload['vllm_profile_id']))
             quantization_evidence = None
             if profile.quantization != 'none':
                 from .quantization import build_prepare_command
@@ -233,7 +248,7 @@ class Worker:
                     resolve = ("~/.aig-vllm/bin/python - <<'PY'\n"
                                "from huggingface_hub import HfApi\n"
                                f"print(HfApi().model_info({profile.model_ref!r}).sha)\nPY")
-                    code, out, err = ssh.run(resolve, timeout=60)
+                    code, out, err = ssh.run(hf_environment + resolve, timeout=60)
                     if code != 0:
                         raise RuntimeError(f'Cannot resolve model revision: {redact(err or out)[-1500:]}')
                     profile = replace(profile, model_revision=out.strip().splitlines()[-1])
@@ -243,7 +258,7 @@ class Worker:
                            "python3 - <<'PY'\nimport base64,pathlib\n"
                            f"pathlib.Path('/tmp/aig-benchmark-control/quantization.py').write_bytes(base64.b64decode({source!r}))\nPY\n"
                            "export PATH=$HOME/.aig-vllm/bin:$HOME/.local/bin:$PATH\n" + prepare)
-                code, out, err = ssh.run(command, timeout=7200)
+                code, out, err = ssh.run(hf_environment + command, timeout=7200)
                 if code != 0:
                     raise RuntimeError(f'Quantized checkpoint preparation failed: {redact(err or out)[-5000:]}')
                 quantization_evidence = json.loads(out.strip().splitlines()[-1])
@@ -257,7 +272,7 @@ class Worker:
                 self.db.execute('UPDATE vllm_profiles SET model_revision=? WHERE id=? AND owner_user_id=?',
                                 (profile.model_revision, int(payload['vllm_profile_id']), user_id))
             checkpoint_path = quantization_evidence['checkpoint_path'] if quantization_evidence else None
-            script = build_start_script(profile, checkpoint_path, quantization_evidence)
+            script = hf_environment + build_start_script(profile, checkpoint_path, quantization_evidence)
             code, out, err = ssh.run(script, timeout=180)
             if code != 0:
                 raise RuntimeError(f"vLLM start failed: {err or out}")
@@ -423,7 +438,8 @@ SYSTEM"""
                 sweep_strategy_type=str(payload.get("sweep_strategy_type") or "poisson"),
                 runtime_evidence=runtime_evidence,
             )
-            command = remote_guidellm_command(spec, int(job_id or 0))
+            hf_environment = self._hf_environment(ssh, user_id, int(payload['vllm_profile_id']))
+            command = hf_environment + remote_guidellm_command(spec, int(job_id or 0))
             timeout = max(900, (spec.max_duration_seconds + 120) * max(1, len(concurrencies)))
             code, out, err = ssh.run(command, timeout=timeout)
             try:
@@ -587,6 +603,7 @@ print(json.dumps({{"target": target, "matched": len(matches), "stopped": stopped
         ssh_public_key = str(payload["ssh_public_key"]).strip()
         ssh_private_key = str(payload.get("ssh_private_key") or "").strip()
         assign_public_ip = bool(payload.get("assign_public_ip", True))
+        smt_requested = payload.get("smt_enabled")
 
         if not ssh_public_key:
             raise RuntimeError("SSH public key is required to deploy a VM")
@@ -600,6 +617,9 @@ print(json.dumps({{"target": target, "matched": len(matches), "stopped": stopped
             compute = clients["compute"]
             network = clients["network"]
             block = clients["block"]
+            platform_config = smt_platform_config(
+                compute, compartment_id, availability_domain, image_id, shape, smt_requested,
+            )
             self._set_job_progress(job_id, 20, "launching_instance", "Submitting OCI compute launch request")
             launch_details = oci.core.models.LaunchInstanceDetails(
                 availability_domain=availability_domain,
@@ -607,6 +627,7 @@ print(json.dumps({{"target": target, "matched": len(matches), "stopped": stopped
                 display_name=display_name,
                 shape=shape,
                 shape_config=shape_config_details(shape, ocpus, memory_gb),
+                platform_config=platform_config,
                 create_vnic_details=oci.core.models.CreateVnicDetails(
                     subnet_id=subnet_id,
                     assign_public_ip=assign_public_ip,
@@ -632,13 +653,13 @@ print(json.dumps({{"target": target, "matched": len(matches), "stopped": stopped
                 INSERT INTO oci_compute_instances(
                   owner_user_id, oci_auth_profile_id, display_name, compartment_id,
                   availability_domain, subnet_id, instance_id, shape, ocpus, memory_gb,
-                  boot_volume_gb, image_id, assign_public_ip, lifecycle_state
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  boot_volume_gb, image_id, assign_public_ip, lifecycle_state, smt_requested
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     user_id, auth_row["id"], display_name, compartment_id, availability_domain,
                     subnet_id, instance_id, shape, ocpus, memory_gb, boot_volume_gb,
-                    image_id, int(assign_public_ip), getattr(instance, "lifecycle_state", "PROVISIONING"),
+                    image_id, int(assign_public_ip), getattr(instance, "lifecycle_state", "PROVISIONING"), smt_requested,
                 ),
             )
             running = oci.wait_until(
@@ -649,6 +670,17 @@ print(json.dumps({{"target": target, "matched": len(matches), "stopped": stopped
                 max_wait_seconds=900,
                 max_interval_seconds=20,
             ).data
+            smt_enabled = instance_smt_enabled(running)
+            self.db.execute(
+                "UPDATE oci_compute_instances SET smt_enabled=?, lifecycle_state=? WHERE instance_id=? AND owner_user_id=?",
+                (smt_enabled, running.lifecycle_state, instance_id, user_id),
+            )
+            if smt_requested is not None and smt_enabled is not smt_requested:
+                raise RuntimeError(
+                    f"Instance {instance_id} is running, but OCI SMT verification failed "
+                    f"(requested={smt_requested}, reported={smt_enabled}). "
+                    "The VM remains running; inspect or destroy it before retrying."
+                )
             self._set_job_progress(
                 job_id,
                 58,
@@ -709,6 +741,8 @@ print(json.dumps({{"target": target, "matched": len(matches), "stopped": stopped
             "ocpus": ocpus,
             "memory_gb": memory_gb,
             "boot_volume_gb": boot_volume_gb,
+            "smt_requested": smt_requested,
+            "smt_enabled": smt_enabled,
             "public_ip": public_ip,
             "private_ip": private_ip,
             "vm_profile_id": vm_profile_id,

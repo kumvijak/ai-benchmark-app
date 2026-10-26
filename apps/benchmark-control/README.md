@@ -62,7 +62,7 @@ The VM, vLLM, and benchmark pages use explicit dropdowns for their targets. A hi
 
 The vLLM tab has a VM selector, saved runtime profile table, and live process table. `Start Runtime` enqueues a runtime-start job for the selected VM/profile pair. `Stop Selected Runtime` enqueues a stop job for the selected process discovered on that VM.
 
-The Benchmarking tab has separate VM and vLLM profile dropdowns. Workload presets populate input tokens, output tokens, requests, and recommended concurrency values. Fixed concurrency mode maps those values to a GuideLLM `concurrent` profile with `streams=[...]`. Sweep mode maps the largest selected concurrency to GuideLLM `sweep.max_concurrency` and uses a Poisson or constant sweep strategy to identify the safe operating range.
+The Benchmarking tab has separate VM and vLLM profile dropdowns. Workload presets populate input tokens, output tokens and requests. Every workload, including Smoke and Custom, offers concurrency choices of 1, 2, 4, 8, 16, 32 and 64; 1, 2, 4, 8 and 16 are selected by default. Fixed concurrency mode maps those values to a GuideLLM `concurrent` profile with `streams=[...]`. Sweep mode maps the largest selected concurrency to GuideLLM `sweep.max_concurrency` and uses a Poisson or constant sweep strategy to identify the safe operating range.
 
 The Report tab renders successful benchmark jobs as a normalized table built from GuideLLM output. CSV, JSON, and HTML downloads are GuideLLM-generated artifacts; Markdown is a compact app rendering of the normalized GuideLLM rows for copying.
 
@@ -147,3 +147,39 @@ The runtime form exposes **CPU memory utilization** (fraction greater than 0 and
 ## Reference-style HTML reports (0.3.3)
 
 New report collections use the reviewed campaign report layout: report details, four labelled performance curves, hardware and runtime cards, a concurrency-column run table with highlighted Throughput/TTFT/TPOT/Query latency groups, measurement notes and source files. Concurrency charts use a log2 axis; guide lines connect recorded points within each attempt and break at missing measurements. Existing normalization, full-request-window timing, throughput, latency units, evidence checks, JSON groups and CSV measurements are unchanged. Pipeline version 1.3.0 creates a new report collection when the same jobs are selected, preserving previous downloads and archives.
+
+### Hugging Face tokens for gated models
+
+In **vLLM Configuration**, enter an optional **Hugging Face token** when creating
+a profile. For an existing saved profile, select its row, enter the token, and
+click **Save HF token for selected profile**. The table shows only **Saved** or
+**Not set**; saved tokens are never returned to the browser. **Clear saved HF
+token** removes the app's encrypted copy. Restart the runtime after changing
+credentials. Use a read token with access to the exact repository, and accept
+its access conditions on Hugging Face first (for example, `google/gemma-7b`).
+
+Tokens are encrypted using the existing app secret and sent to the inference
+VM over SSH stdin, never as command-line arguments. They are stored on the VM
+in an owner-only credential file, scoped to this app and runtime profile.
+`HF_TOKEN_PATH` selects that file for revision resolution, model preparation,
+vLLM launch and GuideLLM tokenizer loading. This keeps separate apps/profiles
+from overwriting the VM user's default Hugging Face login. An empty app token
+preserves the VM's existing login behavior. Credentials are separate from
+serving identity, job payloads, execution snapshots and report configuration.
+
+Clearing/deleting a profile does not revoke the token or erase existing VM
+copies or cached model files. Revoke the token on Hugging Face to invalidate
+those copies. Other users with the same VM account or root access can read its
+credential file. Preserve `APP_SECRET` to decrypt saved app credentials after a
+restart. Database backups contain encrypted credentials and require protection.
+
+Use HTTPS or a trusted tunnel before entering a token: the current public HTTP
+access mode does not encrypt browser-to-app traffic. The GUI displays a reminder
+on non-local HTTP connections; password masking and database encryption do not
+provide transport encryption.
+
+API: optional write-only `hf_token` on `POST /api/vllm-profiles`, and owner-only
+`PUT /api/vllm-profiles/{id}/hf-token` with `{"hf_token":"..."}` or
+`{"hf_token":null}` to clear. Listing returns only `hf_token_configured`.
+
+Reference: [Hugging Face environment variables](https://huggingface.co/docs/huggingface_hub/package_reference/environment_variables).

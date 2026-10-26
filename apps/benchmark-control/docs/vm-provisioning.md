@@ -13,6 +13,7 @@ The VM Connection tab supports two paths.
      - `BM.Standard4.Ax`
    - Uses guide defaults of 16 OCPU, 64 GB memory, 200 GB boot volume, username `ubuntu`, and Canonical Ubuntu 24.04.
    - Allows the user to override OCPU, memory, and boot volume size.
+   - Offers explicit Enabled/Disabled SMT selection (default Enabled) for new instances. This is an OCI platform setting for the entire instance, not runtime thread affinity.
    - Requires explicit user selections for compute compartment, availability domain, network compartment, VCN, subnet, public IP flag, and image.
    - Requires an SSH public key for instance metadata.
    - Accepts the matching SSH private key when the app should create and test the SSH profile automatically.
@@ -49,6 +50,34 @@ New VM deployment is queued as a `provision_vm` job.
 4. The worker discovers the primary VNIC, public/private IPs, and attached boot volume.
 5. If an SSH private key was provided, the worker creates a VM profile and retries SSH setup plus health validation while cloud-init finishes.
 6. The worker stores instance OCID, boot volume OCID, IPs, lifecycle state, and linked VM profile ID.
+
+### SMT selection
+
+The new-VM form submits `smt_enabled: true` or `false`. Before launch, the worker
+queries OCI `list_shapes` for the selected compartment, availability domain and
+image. The requested setting must appear in the shape's
+`platform_config_options.symmetric_multi_threading_options.allowed_values`.
+The worker uses OCI's advertised platform type to create the appropriate AMD,
+Intel or bare-metal launch configuration. Unsupported or unknown capabilities
+fail before launch; there is no retry with a different SMT setting.
+
+After the instance reaches RUNNING, the worker compares OCI's returned
+`platform_config.is_symmetric_multi_threading_enabled` with the request. A mismatch
+or missing value fails the job and identifies the running instance for inspection
+or destruction. It does not automatically delete that VM. Requested and returned
+settings are stored separately; the instance table shows the OCI-reported value.
+This verifies OCI configuration, not guest CPU topology or vLLM thread binding.
+
+The OCPU request is unchanged when SMT is disabled; there is one exposed hardware
+thread per core instead of two. This option applies at creation and does not
+toggle existing VMs. Older API requests/queued jobs that omit `smt_enabled` retain
+OCI defaults, and historical instance records display Unknown until verified.
+
+OCI documents SMT configuration for both Intel and AMD platforms, but the app
+requires the selected shape to advertise the requested value rather than assuming
+all shapes support it:
+- [Creating an instance](https://docs.oracle.com/en-us/iaas/Content/Compute/Tasks/launchinginstance.htm)
+- [Shape SMT options](https://docs.oracle.com/en-us/iaas/tools/python/latest/api/core/models/oci.core.models.ShapeSymmetricMultiThreadingEnabledPlatformOptions.html)
 
 Destroy is queued as a `destroy_vm` job and calls OCI terminate with `preserve_boot_volume=false`. If the boot volume is still available afterward, the worker requests explicit boot-volume deletion.
 
